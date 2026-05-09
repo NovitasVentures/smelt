@@ -1,0 +1,22 @@
+[meta]
+name     = "python_default"
+language = "python"
+version  = "1.0"
+
+[thresholds]
+compliance = 0.95
+goal       = 1.00
+mutation   = 0.70
+
+[iterations]
+max = 20
+
+[scorers]
+active = ["ruff"]
+
+[runners]
+framework = "pytest"
+coverage  = true
+
+[mutator]
+engine = "mutmut"

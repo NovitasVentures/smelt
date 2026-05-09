@@ -1,0 +1,23 @@
+[smelt]
+profile    = "python_default"
+output_dir = "smelt_output"
+log_level  = "info"
+
+[llm]
+provider   = "anthropic"
+model      = "claude-sonnet-4-5"
+max_tokens = 8192
+
+[thresholds]
+compliance = 0.95
+goal       = 1.00
+mutation   = 0.70
+
+[iterations]
+max = 20
+
+[scorers]
+active = ["ruff"]
+
+[runners]
+framework = "pytest"

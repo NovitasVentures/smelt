@@ -1,0 +1,11 @@
+- Basic rate limiting: a single call to acquire(1) on a full bucket succeeds immediately
+- Burst capacity: acquiring up to `burst` tokens at once succeeds when the bucket is full
+- Burst exceeded: requesting more tokens than `burst` raises RateLimitExceeded immediately without sleeping
+- Rate recovery: after draining the bucket, tokens replenish at the configured rate and a subsequent acquire succeeds
+- Thread safety: 10 concurrent threads each calling acquire(1) on a bucket with rate=100 complete without error or state corruption
+- Edge case — single token burst: a bucket with burst=1 allows exactly 1 token at a time
+- Edge case — acquire zero: acquire(0) succeeds immediately without consuming tokens
+- Edge case — fractional rate: a bucket with rate=0.5 (one token per 2 seconds) replenishes correctly
+- RateLimitExceeded is an Exception subclass
+- TokenBucket constructor rejects non-positive rate with ValueError
+- TokenBucket constructor rejects non-positive burst with ValueError
