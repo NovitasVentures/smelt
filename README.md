@@ -14,7 +14,7 @@ provably satisfies it.
 NVIDIA's NVCell system takes a hardware spec and loops overnight — 
 generating candidate layouts, scoring them against design rules, 
 fixing violations — until it produces results that match or exceed 
-what 8 engineers previously built in 10 months.
+what 8 engineers previously built in 10 months [The Batch](https://www.deeplearning.ai/the-batch/issue-352).
 
 Smelt applies the same architecture to software.
 
@@ -57,7 +57,7 @@ line numbers, failing test names. Never just a score.
 ```bash
 pip install smelt
 
-smelt run --spec my_spec.md --goals my_goals.md
+smelt --spec my_spec.md --goals my_goals.md
 ```
 
 ---
@@ -66,8 +66,8 @@ smelt run --spec my_spec.md --goals my_goals.md
 
 | Profile | Language | Scorer | Test runner |
 |---|---|---|---|
-| `python_default` | Python | ruff + black | pytest |
-| `c_misra` | C | clang-tidy + cppcheck | gtest |
+| `python_default` | Python | ruff + mypy | pytest |
+| `c_misra` | C | misra (cppcheck) + clang-tidy | gtest |
 | `cpp_autosar` | C++ | clang-tidy + cppcheck | gtest |
 
 Custom profiles via `smelt.toml`. Scorer interface is pluggable — 
@@ -78,7 +78,7 @@ drop in any tool that returns a score and a list of violations.
 ## Roadmap
 
 - [x] Python / ruff / pytest
-- [ ] C / MISRA / gtest  
+- [x] C / MISRA / gtest  
 - [ ] C++ / AUTOSAR / gtest
 - [ ] GitHub Action
 - [ ] K8s / Terraform / Helm profiles

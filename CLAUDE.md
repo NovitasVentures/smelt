@@ -23,11 +23,9 @@ smelt/
 ├── scorers/
 │   ├── base.py          # Scorer interface (all scorers implement this)
 │   ├── ruff_scorer.py
-│   ├── black_scorer.py
-│   ├── pylint_scorer.py
-│   ├── clang_tidy_scorer.py
+│   ├── mypy_scorer.py
 │   ├── misra_scorer.py
-│   ├── autosar_scorer.py
+│   ├── clang_tidy_scorer.py
 │   └── crasis_scorer.py  # Stub — semantic/architectural scorer (roadmap)
 ├── runners/
 │   ├── base.py           # Test runner interface
@@ -125,7 +123,7 @@ max         = 20     # hard cap before UNCONVERGED
 
 [scorers]
 # List in priority order. All run each iteration.
-active      = ["black", "ruff"]
+active      = ["ruff", "mypy"]
 
 [runners]
 framework   = "pytest"
@@ -136,7 +134,7 @@ engine      = "mutmut"
 
 ---
 
-## Profile 1 — Python / Black / Pytest (Default)
+## Profile 1 — Python / Ruff+Mypy / Pytest (Default)
 
 **File:** `smelt/config/profiles/python_default.toml`
 
@@ -146,7 +144,7 @@ name     = "python_default"
 language = "python"
 
 [scorers]
-active   = ["black", "ruff"]
+active   = ["ruff", "mypy"]
 
 [runners]
 framework = "pytest"
@@ -160,9 +158,8 @@ engine    = "mutmut"
 
 When generating or modifying Python code under this profile:
 
-- Format with `black` — 88 char line length, double quotes, no trailing commas
-  in function signatures unless multi-line
 - Lint with `ruff` — default ruleset plus `E`, `F`, `W`, `I` (isort)
+- Type-check with `mypy` — strict mode, no implicit Any
 - Type hints required on all public functions and methods
 - Docstrings required on all public functions, classes, and modules
   (Google style)
@@ -182,11 +179,11 @@ When generating or modifying Python code under this profile:
 
 ### Compliance Scorer — Python
 
-The black scorer returns 1.0 if `black --check` exits 0, else 0.0 (binary).
 The ruff scorer returns `1.0 - (violations / lines_of_code)` normalized and
-clamped to [0.0, 1.0].
+clamped to [0.0, 1.0]. The mypy scorer returns 1.0 if `mypy` exits 0, else
+`1.0 - (errors / lines_of_code)` normalized and clamped.
 
-Composite compliance = mean(black_score, ruff_score).
+Composite compliance = mean(ruff_score, mypy_score).
 
 ---
 
@@ -244,33 +241,37 @@ Unweighted scorers default to equal weighting.
 
 ```toml
 [meta]
-name     = "c_misra"
+name    = "c_misra"
 language = "c"
+version = "1.0"
+
+[thresholds]
+compliance = 0.90
+goal       = 1.00
+mutation   = 0.70
+
+[iterations]
+max = 15
 
 [scorers]
-active   = ["clang_tidy", "misra"]
-
-[scorers.clang_tidy]
-config   = ".clang-tidy"   # project clang-tidy config
-checks   = "misra-*,cert-*,bugprone-*"
+active  = ["misra", "clang_tidy"]
+weights = { misra = 0.7, clang_tidy = 0.3 }
 
 [scorers.misra]
-ruleset  = "misra_c_2012"  # misra_c_2012 | misra_c_2023
-tool     = "cppcheck"      # cppcheck | polyspace | pc-lint (must be on PATH)
-required = true            # mandatory violations block exit regardless of score
+ruleset             = "misra_c_2012"
+tool                = "cppcheck"
+std                 = "c99"
+total_rules_checked = 143
+
+[scorers.clang_tidy]
+checks = "cert-*,bugprone-*"
 
 [runners]
 framework = "gtest"
-build     = "cmake"        # cmake | make | ninja
-build_dir = "build/"
+build     = "cmake"
 
 [mutator]
-engine    = "mutate++"     # C/C++ mutation engine
-
-[thresholds]
-compliance = 0.95
-goal       = 1.00
-mutation   = 0.70
+engine = "mutate++"
 ```
 
 ### Coding Conventions — C/MISRA
@@ -305,12 +306,15 @@ GTest is C++ but testing C code. The generated test harness must:
 
 ### MISRA Scorer
 
-The MISRA scorer wraps the configured static analysis tool and parses its output.
+The MISRA scorer uses a two-step pipeline: `cppcheck --dump` followed by
+`python3 misra.py` on the generated `.dump` files. Output is parsed via regex
+and mapped to mandatory/required/advisory severity tiers.
 
 Compliance score calculation:
-- Mandatory violations: each one applies a 0.20 penalty (hard, stackable to 0.0)
-- Required violations: `1.0 - (required_count / total_rules_checked)`
+- Score = `max(0.0, 1.0 - non_advisory_count / 5.0)`
+- Any 5 or more non-advisory (mandatory + required) violations scores 0.0
 - Advisory violations: reported in trace but do not affect score
+- Mandatory violations also block CONVERGED exit regardless of score
 
 The reprompt payload for MISRA failures must include:
 - Rule ID (e.g. `MISRA C:2012 Rule 15.5`)
@@ -514,7 +518,9 @@ These rules apply regardless of language, profile, or configuration:
 3. Always include specific failure detail in reprompts — score alone is not a prompt
 4. Always write the iteration trace — a run with no trace is an invalid run
 5. Never exit CONVERGED with a mandatory MISRA or AUTOSAR violation outstanding
-6. The mutation gate runs before freezing — it cannot be skipped via config
+6. The mutation gate runs before freezing — it can only be bypassed when the
+   configured mutation engine is not on PATH (logs a warning, records `null`
+   kill rate in manifest). It cannot be disabled via config.
 7. **The code generator never sees test source code — ever.**
 
 ### Rule 7 — Black Box Generation
@@ -543,4 +549,4 @@ drives convergence through failure detail alone. The generator learns what faile
 and what was expected, never how the test is written.
 
 This is the architectural guarantee that makes the loop meaningful. Violating it
-produces Demo 1. Honoring it produces Demo 2.
+produces Demo 1. Honoring it produces Demo 2 (Python) and Demo 3 (C/MISRA).
