@@ -43,7 +43,7 @@ def run(
         console.print(f"[bold red]Error:[/] goals file not found: {goals}")
         raise typer.Exit(1)
 
-    cfg = settings.load(config_path)
+    cfg = settings.load(config_path, profile_path=profile)
 
     loop.run(
         spec_path=spec,

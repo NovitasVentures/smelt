@@ -14,7 +14,7 @@ from smelt.mutator import mutation_gate
 
 log = logging.getLogger(__name__)
 
-_TEST_GEN_SYSTEM_TEMPLATE = """\
+_TEST_GEN_SYSTEM_PYTHON = """\
 You are generating a pytest test suite from a spec and test goals.
 Tests must be non-trivial — do not write tests that pass on a stub \
 implementation that returns None or 0.
@@ -23,7 +23,22 @@ input variations where sensible.
 Import the implementation from a module named `{module_name}`.
 Output ONLY the test file. No explanation. No markdown fences."""
 
-_BASELINE_GEN_SYSTEM = """\
+_TEST_GEN_SYSTEM_C = """\
+You are generating a GTest C++ test harness for a C implementation named `{module_name}`.
+The C source file will be `{module_name}.c` and header `{module_name}.h`.
+Include the C header with an extern "C" block:
+  extern "C" {{
+    #include "{module_name}.h"
+  }}
+Tests must be non-trivial — do not write tests that pass on a stub returning 0 for everything.
+Cover every behavior described in the test goals.
+Use TEST(SuiteName, TestName_Scenario_ExpectedOutcome) naming.
+Use ASSERT_* for preconditions that make further testing meaningless.
+Use EXPECT_* for all other assertions.
+Do NOT use dynamic memory in tests (no new, no malloc).
+Output ONLY the .cpp test file. No explanation. No markdown fences."""
+
+_BASELINE_GEN_SYSTEM_PYTHON = """\
 You are generating a working Python implementation from a spec and test file.
 The implementation must make the test suite pass — this is used as a baseline \
 for mutation testing, not as the final deliverable.
@@ -32,6 +47,17 @@ Rules:
 - Do NOT use import statements inside function bodies — put all imports at module level.
 - Implement the logic directly with plain Python control flow.
 Output ONLY the Python file. No explanation. No markdown fences."""
+
+_BASELINE_GEN_SYSTEM_C = """\
+You are generating a minimal stub C implementation for mutation testing scaffolding.
+The stub just needs to compile and link with a GTest harness — it does not need to pass tests.
+Provide both a header and implementation using this exact delimiter format:
+--- HEADER ---
+(header file content)
+--- SOURCE ---
+(source file content)
+All functions should return 0 or a zero-equivalent status. No dynamic memory.
+Output ONLY the two sections above. No explanation. No markdown fences."""
 
 _REGEN_SUFFIX = """\
 
@@ -61,7 +87,7 @@ def run(
         config: Smelt runtime config.
         output_dir: Root output directory for this run.
         run_id: Unique run identifier (used in manifest).
-        module_name: Python module name the tests will import from.
+        module_name: Module name the tests will import/include.
 
     Returns:
         Path to the frozen test file.
@@ -69,6 +95,19 @@ def run(
     Raises:
         RuntimeError: If mutation gate never passes within MAX_GATE_ATTEMPTS.
     """
+    if config.language == "c":
+        return _run_c(spec, goals, config, output_dir, run_id, module_name)
+    return _run_python(spec, goals, config, output_dir, run_id, module_name)
+
+
+def _run_python(
+    spec: str,
+    goals: str,
+    config: SmeltConfig,
+    output_dir: Path,
+    run_id: str,
+    module_name: str,
+) -> Path:
     frozen_dir = output_dir / "frozen_tests"
     frozen_dir.mkdir(parents=True, exist_ok=True)
 
@@ -86,7 +125,7 @@ def run(
             )
 
         test_source = llm.complete(
-            system=_TEST_GEN_SYSTEM_TEMPLATE.format(module_name=module_name),
+            system=_TEST_GEN_SYSTEM_PYTHON.format(module_name=module_name),
             user=user_prompt,
             model=config.model,
             max_tokens=config.max_tokens,
@@ -99,10 +138,12 @@ def run(
 
             log.info("Phase 1: generating baseline implementation for mutation gate")
             baseline_source = llm.complete(
-                system=_BASELINE_GEN_SYSTEM,
-                user=f"SPEC:\n{spec}\n\nTEST FILE:\n{test_source}\n\n"
-                     f"Generate a working implementation for module `{module_name}` "
-                     f"that passes the test suite.",
+                system=_BASELINE_GEN_SYSTEM_PYTHON,
+                user=(
+                    f"SPEC:\n{spec}\n\nTEST FILE:\n{test_source}\n\n"
+                    f"Generate a working implementation for module `{module_name}` "
+                    f"that passes the test suite."
+                ),
                 model=config.model,
                 max_tokens=config.max_tokens,
             )
@@ -110,7 +151,10 @@ def run(
             baseline_file = tmp_dir / f"{module_name}.py"
             baseline_file.write_text(baseline_source, encoding="utf-8")
 
-            log.info("Phase 1: running mutation gate (threshold=%.0f%%)", config.mutation_threshold * 100)
+            log.info(
+                "Phase 1: running mutation gate (threshold=%.0f%%)",
+                config.mutation_threshold * 100,
+            )
             kill_rate, passed = mutation_gate.run(
                 test_path=test_file,
                 stub_path=baseline_file,
@@ -122,20 +166,7 @@ def run(
                 log.info("Phase 1: mutation gate passed (kill rate=%.0f%%)", kill_rate * 100)
                 frozen_path = frozen_dir / f"test_{module_name}.py"
                 shutil.copy(test_file, frozen_path)
-
-                test_hash = _sha256(test_source)
-                manifest = {
-                    "run_id": run_id,
-                    "spec_hash": spec_hash,
-                    "test_hash": test_hash,
-                    "module_name": module_name,
-                    "profile": config.profile,
-                    "generated_at": datetime.now(timezone.utc).isoformat(),
-                    "mutation_kill_rate": kill_rate,
-                }
-                (output_dir / "manifest.json").write_text(
-                    json.dumps(manifest, indent=2), encoding="utf-8"
-                )
+                _write_manifest(output_dir, run_id, spec, module_name, config, test_source, kill_rate)
                 return frozen_path
 
             log.warning(
@@ -149,6 +180,70 @@ def run(
         f"Phase 1 failed: mutation gate did not pass after {MAX_GATE_ATTEMPTS} attempts. "
         f"Last kill rate: {kill_rate:.0%} (required: {config.mutation_threshold:.0%})"
     )
+
+
+def _run_c(
+    spec: str,
+    goals: str,
+    config: SmeltConfig,
+    output_dir: Path,
+    run_id: str,
+    module_name: str,
+) -> Path:
+    """Phase 1 for C: generate GTest harness, bypass mutation gate if mutate++ unavailable."""
+    frozen_dir = output_dir / "frozen_tests"
+    frozen_dir.mkdir(parents=True, exist_ok=True)
+
+    user_prompt = _build_test_gen_prompt(spec, goals)
+
+    log.info("Phase 1 (C): generating GTest test harness")
+    test_source = llm.complete(
+        system=_TEST_GEN_SYSTEM_C.format(module_name=module_name),
+        user=user_prompt,
+        model=config.model,
+        max_tokens=config.max_tokens,
+    )
+
+    frozen_path = frozen_dir / f"test_{module_name}.cpp"
+    frozen_path.write_text(test_source, encoding="utf-8")
+
+    # Mutation gate: bypass if mutate++ is not installed
+    kill_rate: float | None = None
+    engine = config.mutation_engine
+    if shutil.which(engine):
+        log.info("Phase 1 (C): mutation gate via %s (not yet implemented — bypassing)", engine)
+        kill_rate = None
+    else:
+        log.warning(
+            "Phase 1 (C): %s not found on PATH. Mutation gate bypassed. "
+            "MISRA and GTest scorers remain active.",
+            engine,
+        )
+
+    _write_manifest(output_dir, run_id, spec, module_name, config, test_source, kill_rate)
+    return frozen_path
+
+
+def _write_manifest(
+    output_dir: Path,
+    run_id: str,
+    spec: str,
+    module_name: str,
+    config: SmeltConfig,
+    test_source: str,
+    kill_rate: float | None,
+) -> None:
+    manifest = {
+        "run_id": run_id,
+        "spec_hash": _sha256(spec),
+        "test_hash": _sha256(test_source),
+        "module_name": module_name,
+        "profile": config.profile,
+        "language": config.language,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "mutation_kill_rate": kill_rate,
+    }
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def _build_test_gen_prompt(spec: str, goals: str) -> str:

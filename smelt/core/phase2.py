@@ -4,6 +4,7 @@ import ast
 import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -14,18 +15,42 @@ from rich.text import Text
 from smelt.config.settings import SmeltConfig
 from smelt.llm import client as llm
 from smelt.runners.base import Failure, RunResult
-from smelt.runners.pytest_runner import PytestRunner
 from smelt.scorers.base import ScoreResult, Violation
 
 log = logging.getLogger(__name__)
 
-_GEN_SYSTEM = """\
+_GEN_SYSTEM_PYTHON = """\
 You are generating Python code that will be scored and iteratively refined \
 against frozen tests.
 Do not hardcode values to pass specific tests.
 Do not modify test files — they are read-only ground truth.
 Fix the failures described. Do not introduce new ones.
 Output ONLY the implementation file. No explanation. No markdown fences."""
+
+_GEN_SYSTEM_C = """\
+You are generating C code (C99) that will be scored against MISRA C:2012 \
+compliance rules and run against a frozen GTest test suite.
+Do not hardcode values to pass specific tests.
+Do not modify test files — they are read-only ground truth.
+Fix the failures described. Do not introduce new ones.
+
+MISRA C:2012 constraints you MUST satisfy:
+- No dynamic memory allocation (malloc, calloc, realloc, free) — Rule 21.3
+- No standard I/O in library code (printf, scanf, etc.) — Rule 21.6
+- No recursion — Rule 17.2
+- All integer types from stdint.h fixed-width types (uint8_t, uint16_t, uint32_t, etc.)
+- Every function must have a single return statement at the end — Rule 15.5
+- All functions must be declared before use (provide a header file)
+- Every switch statement must have a default clause — Rule 16.4
+- No goto — Rule 15.1
+
+Output the implementation as exactly two sections separated by this delimiter:
+--- HEADER ---
+(content of the .h header file here)
+--- SOURCE ---
+(content of the .c source file here)
+
+No explanation. No markdown fences. Nothing before --- HEADER --- or after the source."""
 
 
 @dataclass
@@ -48,15 +73,22 @@ class LoopResult:
     final_composite: float = 0.0
 
 
-def extract_signatures(test_file: Path) -> str:
-    """Extract test function signatures from a frozen test file.
+def extract_signatures(test_file: Path, language: str = "python") -> str:
+    """Extract test signatures from a frozen test file.
+
+    For Python: parses AST and returns function signatures.
+    For C: extracts TEST(Suite, Name) declarations via regex.
 
     Args:
         test_file: Path to the frozen test file.
+        language: "python" or "c".
 
     Returns:
-        Newline-joined list of test function signatures (name + params, no body).
+        Newline-joined list of test signatures.
     """
+    if language == "c":
+        return _extract_gtest_names(test_file)
+
     source = test_file.read_text(encoding="utf-8")
     try:
         tree = ast.parse(source)
@@ -71,21 +103,49 @@ def extract_signatures(test_file: Path) -> str:
             continue
         args = node.args
         params: list[str] = []
-        # positional args
         for arg in args.args:
             params.append(arg.arg)
-        # *args
         if args.vararg:
             params.append(f"*{args.vararg.arg}")
-        # keyword-only args
         for arg in args.kwonlyargs:
             params.append(arg.arg)
-        # **kwargs
         if args.kwarg:
             params.append(f"**{args.kwarg.arg}")
         signatures.append(f"{node.name}({', '.join(params)})")
 
     return "\n".join(signatures)
+
+
+def _extract_gtest_names(test_file: Path) -> str:
+    """Extract TEST/TEST_F/TEST_P declarations from a GTest .cpp file."""
+    pattern = re.compile(r"\bTEST(?:_F|_P)?\s*\(\s*(\w+)\s*,\s*(\w+)\s*\)")
+    source = test_file.read_text(encoding="utf-8")
+    names = [f"TEST({m.group(1)}, {m.group(2)})" for m in pattern.finditer(source)]
+    return "\n".join(names)
+
+
+def _split_and_write_c(source: str, code_dir: Path, module_name: str) -> None:
+    """Split LLM output at --- SOURCE --- delimiter into .h and .c files."""
+    if "--- SOURCE ---" in source:
+        header_part, _, source_part = source.partition("--- SOURCE ---")
+        header_part = header_part.replace("--- HEADER ---", "").strip()
+        source_part = source_part.strip()
+    else:
+        header_part = ""
+        source_part = source.strip()
+
+    (code_dir / f"{module_name}.c").write_text(source_part, encoding="utf-8")
+    if header_part:
+        (code_dir / f"{module_name}.h").write_text(header_part, encoding="utf-8")
+
+
+def _has_mandatory_violations(scorer_results: dict[str, ScoreResult]) -> bool:
+    """Return True if any MISRA mandatory violations remain."""
+    for result in scorer_results.values():
+        for v in result.violations:
+            if "[mandatory]" in v.rule:
+                return True
+    return False
 
 
 def _assert_no_test_source(prompt: str, frozen_test_path: Path) -> None:
@@ -120,26 +180,29 @@ def run(
         output_dir: Run output directory (contains manifest.json).
         config: Smelt runtime config.
         console: Rich console for terminal output.
-        module_name: Python module name to generate (e.g. "implementation").
+        module_name: Module name to generate (e.g. "ring_buffer").
 
     Returns:
         LoopResult with status and iteration trace.
     """
+    from smelt.runners import RUNNER_REGISTRY
     from smelt.scorers import SCORER_REGISTRY
 
     manifest_path = output_dir / "manifest.json"
     test_hash = _sha256(frozen_test_path.read_text(encoding="utf-8"))
-    signatures = extract_signatures(frozen_test_path)
+    signatures = extract_signatures(frozen_test_path, language=config.language)
 
     scorers = {name: SCORER_REGISTRY[name]() for name in config.scorers if name in SCORER_REGISTRY}
-    runner = PytestRunner()
+    runner = RUNNER_REGISTRY[config.runner]()
     records: list[IterationRecord] = []
+
+    gen_system = _GEN_SYSTEM_C if config.language == "c" else _GEN_SYSTEM_PYTHON
+    ext = ".c" if config.language == "c" else ".py"
 
     prior_scorer_results: dict[str, ScoreResult] | None = None
     prior_goal: RunResult | None = None
 
     for n in range(1, config.max_iterations + 1):
-        # Integrity check — abort if frozen tests were touched
         _verify_manifest(manifest_path, frozen_test_path, test_hash)
 
         iter_dir = output_dir / "iterations" / f"{n:03d}"
@@ -156,26 +219,29 @@ def run(
             weights=config.scorer_weights,
         )
 
-        # Hard abort if test source leaked into prompt
         _assert_no_test_source(prompt, frozen_test_path)
 
         log.info("Phase 2 iteration %d: generating implementation", n)
         implementation_source = llm.complete(
-            system=_GEN_SYSTEM,
+            system=gen_system,
             user=prompt,
             model=config.model,
             max_tokens=config.max_tokens,
         )
 
-        impl_file = code_dir / f"{module_name}.py"
-        impl_file.write_text(implementation_source, encoding="utf-8")
+        if config.language == "c":
+            _split_and_write_c(implementation_source, code_dir, module_name)
+        else:
+            (code_dir / f"{module_name}{ext}").write_text(implementation_source, encoding="utf-8")
 
         scorer_results: dict[str, ScoreResult] = {}
         for name, scorer in scorers.items():
             scorer_results[name] = scorer.score(code_dir, config=config.scorer_config.get(name, {}))
 
         compliance_score = _weighted_compliance(scorer_results, config.scorer_weights)
-        goal_result = runner.run(frozen_test_path, code_dir, config={})
+        goal_result = runner.run(
+            frozen_test_path, code_dir, config={"module_name": module_name}
+        )
         composite = compliance_score * goal_result.goal_score
 
         _write_iteration(iter_dir, scorer_results, goal_result, n, compliance_score, composite)
@@ -194,14 +260,16 @@ def run(
         prior_scorer_results = scorer_results
         prior_goal = goal_result
 
-        if (
+        converged = (
             compliance_score >= config.compliance_threshold
             and goal_result.goal_score >= config.goal_threshold
-        ):
-            _write_final(output_dir, code_dir, module_name, implementation_source)
+            and not _has_mandatory_violations(scorer_results)
+        )
+        if converged:
+            _write_final(output_dir, code_dir, module_name, implementation_source, config.language)
             return LoopResult(status="CONVERGED", iterations=records, final_composite=composite)
 
-    _write_final(output_dir, code_dir, module_name, implementation_source)
+    _write_final(output_dir, code_dir, module_name, implementation_source, config.language)
     return LoopResult(
         status="UNCONVERGED",
         iterations=records,
@@ -354,11 +422,19 @@ def _write_iteration(
 
 
 def _write_final(
-    output_dir: Path, code_dir: Path, module_name: str, source: str
+    output_dir: Path, code_dir: Path, module_name: str, source: str, language: str = "python"
 ) -> None:
     final_dir = output_dir / "final" / "code"
     final_dir.mkdir(parents=True, exist_ok=True)
-    (final_dir / f"{module_name}.py").write_text(source, encoding="utf-8")
+    if language == "c":
+        for suffix in (".c", ".h"):
+            src = code_dir / f"{module_name}{suffix}"
+            if src.exists():
+                (final_dir / f"{module_name}{suffix}").write_text(
+                    src.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+    else:
+        (final_dir / f"{module_name}.py").write_text(source, encoding="utf-8")
 
 
 def _render(
@@ -375,25 +451,20 @@ def _render(
     total_tests = goal_result.passed + goal_result.failed
     lines: list[str] = [f"  iteration {record.n}/{config.max_iterations}", ""]
 
-    # Per-scorer compliance rows
     lines.append("  compliance")
     for name, result in scorer_results.items():
         vcount = len(result.violations)
         suffix = f"  {vcount} violation{'s' if vcount != 1 else ''}" if vcount else ""
-        lines.append(f"    {name:<8}  {bar(result.score)}  {result.score:.2f}{suffix}")
+        lines.append(f"    {name:<12}  {bar(result.score)}  {result.score:.2f}{suffix}")
     lines.append(
-        f"    {'weighted':<8}  {bar(record.compliance_score)}  {record.compliance_score:.2f}"
+        f"    {'weighted':<12}  {bar(record.compliance_score)}  {record.compliance_score:.2f}"
     )
 
-    # Goal row
     lines.append("")
     passing_str = f"  {goal_result.passed}/{total_tests} tests passing" if total_tests else ""
-    lines.append(f"  goal      {bar(record.goal_score)}  {record.goal_score:.2f}{passing_str}")
+    lines.append(f"  goal          {bar(record.goal_score)}  {record.goal_score:.2f}{passing_str}")
+    lines.append(f"\n  composite     {bar(record.composite)}  {record.composite:.2f}")
 
-    # Composite
-    lines.append(f"\n  composite {bar(record.composite)}  {record.composite:.2f}")
-
-    # Compliance failure detail
     all_violations: list[tuple[str, Violation]] = []
     for name, result in scorer_results.items():
         for v in result.violations[:5]:
@@ -406,7 +477,6 @@ def _render(
         if total_v > 8:
             lines.append(f"    ... and {total_v - 8} more")
 
-    # Test failure detail
     if goal_result.failures:
         lines.append("\n  test failures:")
         for f in goal_result.failures[:5]:
@@ -426,7 +496,7 @@ def _render(
         title = f"[bold green]✓ CONVERGED[/]  iteration {record.n}/{config.max_iterations}"
         border = "green"
     else:
-        title = f"[bold cyan]Phase 2 — Generation Loop[/]"
+        title = "[bold cyan]Phase 2 — Generation Loop[/]"
         border = "bright_blue"
 
     console.print(Panel("\n".join(lines), title=title, border_style=border))

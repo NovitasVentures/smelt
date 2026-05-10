@@ -1,0 +1,32 @@
+[meta]
+name    = "c_misra"
+language = "c"
+version = "1.0"
+
+[thresholds]
+compliance = 0.90
+goal       = 1.00
+mutation   = 0.70
+
+[iterations]
+max = 15
+
+[scorers]
+active  = ["misra", "clang_tidy"]
+weights = { misra = 0.7, clang_tidy = 0.3 }
+
+[scorers.misra]
+ruleset             = "misra_c_2012"
+tool                = "cppcheck"
+std                 = "c99"
+total_rules_checked = 143
+
+[scorers.clang_tidy]
+checks = "cert-*,bugprone-*"
+
+[runners]
+framework = "gtest"
+build     = "cmake"
+
+[mutator]
+engine = "mutate++"
