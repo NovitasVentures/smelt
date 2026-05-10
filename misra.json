@@ -1,7 +1,7 @@
 {
     "script": "misra.py",
     "args": [
-        "--rule-texts=/home/aoaustin/projects/smelt/misra_rules.txt",
+        "--rule-texts=./misra_rules.txt",
         "--suppress-rules=1.1,1.2"
     ]
 }
