@@ -63,6 +63,7 @@ def run(
     console.rule("[bold]Phase 2 — Generation Loop[/]")
     result = phase2.run(
         spec=spec,
+        goals=goals,
         frozen_test_path=frozen_test_path,
         output_dir=output_dir,
         config=config,

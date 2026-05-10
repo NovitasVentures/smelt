@@ -20,6 +20,8 @@ class SmeltConfig:
     mutation_threshold: float = 0.70
     max_iterations: int = 20
     scorers: list[str] = field(default_factory=lambda: ["ruff"])
+    scorer_weights: dict[str, float] = field(default_factory=dict)
+    scorer_config: dict[str, dict] = field(default_factory=dict)
     runner: str = "pytest"
 
 
@@ -72,6 +74,11 @@ def load(config_path: Path | None = None) -> SmeltConfig:
     scorers = raw.get("scorers", {})
     if "active" in scorers:
         cfg.scorers = scorers["active"]
+    if "weights" in scorers:
+        cfg.scorer_weights = {k: float(v) for k, v in scorers["weights"].items()}
+    for key, val in scorers.items():
+        if key not in ("active", "weights") and isinstance(val, dict):
+            cfg.scorer_config[key] = val
 
     runners = raw.get("runners", {})
     if "framework" in runners:

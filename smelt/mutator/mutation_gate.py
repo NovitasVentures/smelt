@@ -36,7 +36,6 @@ def run(
 
         src_dir = tmp_dir / "src"
         src_dir.mkdir()
-        (src_dir / "__init__.py").write_text("", encoding="utf-8")
         shutil.copy(stub_path, src_dir / f"{module_name}.py")
 
         tests_dir = tmp_dir / "tests"
@@ -50,8 +49,8 @@ def run(
         result = subprocess.run(
             [
                 "mutmut", "run",
-                "--paths-to-mutate", str(src_dir),
-                "--tests-dir", str(tests_dir),
+                "--paths-to-mutate", str(src_dir.relative_to(tmp_dir)),
+                "--tests-dir", str(tests_dir.relative_to(tmp_dir)),
                 "--simple-output",
                 "--no-progress",
             ],

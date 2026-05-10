@@ -29,7 +29,12 @@ class PytestRunner(BaseRunner):
         env["PYTHONPATH"] = f"{code_path}:{existing}" if existing else str(code_path)
 
         result = subprocess.run(
-            ["pytest", str(test_path), "-v", "--tb=short", "--no-header", "-q"],
+            [
+                "pytest", str(test_path),
+                "-v", "--tb=short", "--no-header", "-q",
+                "--cache-clear",
+                "--import-mode=importlib",
+            ],
             capture_output=True,
             text=True,
             env=env,

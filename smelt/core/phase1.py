@@ -14,20 +14,23 @@ from smelt.mutator import mutation_gate
 
 log = logging.getLogger(__name__)
 
-_TEST_GEN_SYSTEM = """\
+_TEST_GEN_SYSTEM_TEMPLATE = """\
 You are generating a pytest test suite from a spec and test goals.
 Tests must be non-trivial — do not write tests that pass on a stub \
 implementation that returns None or 0.
 Cover every behavior described in the test goals. Use parametrize for \
 input variations where sensible.
-Import the implementation from a module named `implementation`.
+Import the implementation from a module named `{module_name}`.
 Output ONLY the test file. No explanation. No markdown fences."""
 
-_STUB_GEN_SYSTEM = """\
-You are generating a minimal Python stub implementation.
-The stub must define all functions and classes the tests import, \
-but every function body should return None (or 0/False/"" as needed \
-to avoid syntax errors).
+_BASELINE_GEN_SYSTEM = """\
+You are generating a working Python implementation from a spec and test file.
+The implementation must make the test suite pass — this is used as a baseline \
+for mutation testing, not as the final deliverable.
+Rules:
+- Do NOT use eval(), exec(), or compile() — mutation testing cannot instrument these.
+- Do NOT use import statements inside function bodies — put all imports at module level.
+- Implement the logic directly with plain Python control flow.
 Output ONLY the Python file. No explanation. No markdown fences."""
 
 _REGEN_SUFFIX = """\
@@ -83,7 +86,7 @@ def run(
             )
 
         test_source = llm.complete(
-            system=_TEST_GEN_SYSTEM,
+            system=_TEST_GEN_SYSTEM_TEMPLATE.format(module_name=module_name),
             user=user_prompt,
             model=config.model,
             max_tokens=config.max_tokens,
@@ -94,23 +97,23 @@ def run(
             test_file = tmp_dir / f"test_{module_name}.py"
             test_file.write_text(test_source, encoding="utf-8")
 
-            log.info("Phase 1: generating stub implementation")
-            stub_source = llm.complete(
-                system=_STUB_GEN_SYSTEM,
+            log.info("Phase 1: generating baseline implementation for mutation gate")
+            baseline_source = llm.complete(
+                system=_BASELINE_GEN_SYSTEM,
                 user=f"SPEC:\n{spec}\n\nTEST FILE:\n{test_source}\n\n"
-                     f"Generate a stub for module `{module_name}` that satisfies "
-                     f"all imports but does nothing.",
+                     f"Generate a working implementation for module `{module_name}` "
+                     f"that passes the test suite.",
                 model=config.model,
                 max_tokens=config.max_tokens,
             )
 
-            stub_file = tmp_dir / f"{module_name}.py"
-            stub_file.write_text(stub_source, encoding="utf-8")
+            baseline_file = tmp_dir / f"{module_name}.py"
+            baseline_file.write_text(baseline_source, encoding="utf-8")
 
             log.info("Phase 1: running mutation gate (threshold=%.0f%%)", config.mutation_threshold * 100)
             kill_rate, passed = mutation_gate.run(
                 test_path=test_file,
-                stub_path=stub_file,
+                stub_path=baseline_file,
                 threshold=config.mutation_threshold,
                 module_name=module_name,
             )

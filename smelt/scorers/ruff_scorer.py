@@ -28,8 +28,11 @@ class RuffScorer(BaseScorer):
 
         line_count = _count_non_blank_lines(py_files)
 
+        select = config.get("select", [])
+        select_args = ["--select", ",".join(select)] if select else []
+
         result = subprocess.run(
-            ["ruff", "check", str(code_path), "--output-format=json"],
+            ["ruff", "check", str(code_path), "--output-format=json", "--isolated"] + select_args,
             capture_output=True,
             text=True,
         )
