@@ -1,6 +1,4 @@
-# CLAUDE.md
-
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+# Smelt — CLAUDE.md
 
 **https://runsmelt.dev** · MIT License · FOSS
 
@@ -10,35 +8,6 @@ scoring it against frozen tests and compliance rules, and reprompting with failu
 detail — until the code converges to a passing, compliant state.
 
 The loop is the product. The scorer is pluggable. The tests are immutable once frozen.
-
----
-
-## Development Commands
-
-```bash
-# Install in editable mode
-pip install -e ".[dev]"
-
-# Run all tests
-pytest tests/
-
-# Run a single test
-pytest tests/test_<module>.py::test_<name>
-
-# Lint
-ruff check smelt/
-black --check smelt/
-
-# Format
-black smelt/
-
-# Type check
-mypy smelt/
-
-# Run smelt against a spec
-smelt run --spec my_spec.md --goals my_goals.md
-smelt run --spec my_spec.md --goals my_goals.md --profile smelt/config/profiles/python_default.toml
-```
 
 ---
 
@@ -546,3 +515,32 @@ These rules apply regardless of language, profile, or configuration:
 4. Always write the iteration trace — a run with no trace is an invalid run
 5. Never exit CONVERGED with a mandatory MISRA or AUTOSAR violation outstanding
 6. The mutation gate runs before freezing — it cannot be skipped via config
+7. **The code generator never sees test source code — ever.**
+
+### Rule 7 — Black Box Generation
+
+The Phase 2 generation prompt contains:
+- The original spec
+- The original test goals (natural language)
+- Test function *signatures only* — names and parameters, no assertions
+- Failure detail from the previous iteration — test name, expected vs actual, traceback
+
+The Phase 2 generation prompt never contains:
+- Test source code
+- Test assertions
+- Any content from the frozen test file beyond function signatures
+
+**Why this matters:** If the generator sees test source it reverse-engineers the
+implementation from the assertions rather than deriving it from the spec. It will
+match the test's implementation strategy, expose internal state that tests happen
+to reference, and converge in one iteration by reading the answers rather than
+solving the problem. This produces code that is correct-by-inspection rather than
+correct-by-design.
+
+Black box generation means the generator sees exactly what a developer sees before
+a test suite exists — the requirements, not the verification mechanism. The loop
+drives convergence through failure detail alone. The generator learns what failed
+and what was expected, never how the test is written.
+
+This is the architectural guarantee that makes the loop meaningful. Violating it
+produces Demo 1. Honoring it produces Demo 2.
