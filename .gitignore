@@ -221,3 +221,9 @@ __marimo__/
 .streamlit/secrets.toml
 smelt_output/
 .env
+
+# Crasis / arch-import artifacts
+specialists/          # trained ONNX specialist binaries
+specs/                # generated Crasis specs awaiting human review
+.smelt_cache/         # LLM extraction cache
+data/                 # crasis synthetic training data cache

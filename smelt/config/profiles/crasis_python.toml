@@ -1,0 +1,35 @@
+[meta]
+name     = "crasis_python"
+language = "python"
+version  = "1.0"
+
+[thresholds]
+compliance = 0.90
+goal       = 1.00
+mutation   = 0.50  # SEiP pattern generates equivalent mutants on result-accumulator initialization
+
+[iterations]
+max = 15
+
+[scorers]
+active  = ["ruff", "mypy", "crasis"]
+weights = { ruff = 0.15, mypy = 0.15, crasis = 0.70 }
+
+[scorers.mypy]
+flags = ["--strict", "--no-error-summary"]
+
+[scorers.crasis]
+models_dir           = "specialists"
+confidence_threshold = 0.80
+mandatory_principles = [
+  "single-exit-path",
+  "bare-except-clause",
+  "swallowed-exception",
+  "missing-exception-rewrap",
+]
+
+[runners]
+framework = "pytest"
+
+[mutator]
+engine = "mutmut"

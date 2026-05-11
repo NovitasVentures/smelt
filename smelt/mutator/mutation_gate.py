@@ -1,17 +1,20 @@
 """Mutation gate: validates test suite quality before freezing."""
 
 import logging
+import os
 import shutil
+import site
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 log = logging.getLogger(__name__)
 
 # mutmut 2.x status values stored in the SQLite cache
-_KILLED_STATUSES = {"ok_killed", "timeout"}
-_SURVIVED_STATUSES = {"survived", "suspicious"}
+_KILLED_STATUSES = {"ok_killed", "bad_timeout"}
+_SURVIVED_STATUSES = {"bad_survived", "ok_suspicious"}
 
 
 def run(
@@ -31,6 +34,14 @@ def run(
     Returns:
         Tuple of (kill_rate, passed) where passed = kill_rate >= threshold.
     """
+    # Build PYTHONPATH so mutmut's subprocess pytest can find packages installed
+    # in the current interpreter's environment (e.g. project stubs like coffeeloop_core).
+    site_packages = site.getsitepackages() if hasattr(site, "getsitepackages") else []
+    user_site = site.getusersitepackages() if hasattr(site, "getusersitepackages") else ""
+    extra_paths = [p for p in site_packages + ([user_site] if user_site else []) if p]
+    existing_pythonpath = os.environ.get("PYTHONPATH", "")
+    pythonpath = os.pathsep.join(filter(None, [existing_pythonpath] + extra_paths))
+
     with tempfile.TemporaryDirectory() as tmp:
         tmp_dir = Path(tmp)
 
@@ -40,15 +51,24 @@ def run(
 
         tests_dir = tmp_dir / "tests"
         tests_dir.mkdir()
-        # conftest so pytest finds src/ on sys.path
+        # conftest adds src/ and the current interpreter's site-packages to sys.path
+        # so mutmut's spawned pytest process can import both the module under test
+        # and any installed packages the test suite depends on.
+        site_paths_repr = repr(extra_paths)
         (tests_dir / "conftest.py").write_text(
-            f"import sys; sys.path.insert(0, '{src_dir}')\n", encoding="utf-8"
+            f"import sys\n"
+            f"sys.path.insert(0, {str(src_dir)!r})\n"
+            f"for _p in {site_paths_repr}:\n"
+            f"    if _p not in sys.path:\n"
+            f"        sys.path.append(_p)\n",
+            encoding="utf-8",
         )
         shutil.copy(test_path, tests_dir / test_path.name)
 
+        subprocess_env = {**os.environ, "PYTHONPATH": pythonpath}
         result = subprocess.run(
             [
-                "mutmut", "run",
+                sys.executable, "-m", "mutmut", "run",
                 "--paths-to-mutate", str(src_dir.relative_to(tmp_dir)),
                 "--tests-dir", str(tests_dir.relative_to(tmp_dir)),
                 "--simple-output",
@@ -57,6 +77,7 @@ def run(
             capture_output=True,
             text=True,
             cwd=tmp_dir,
+            env=subprocess_env,
         )
         log.debug("mutmut stdout:\n%s", result.stdout)
         log.debug("mutmut stderr:\n%s", result.stderr)

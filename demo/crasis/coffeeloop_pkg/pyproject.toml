@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coffeeloop-core"
+version = "0.1.0"
+description = "CoffeeLoop shared domain types and exceptions — demo stub package"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["coffeeloop_core"]

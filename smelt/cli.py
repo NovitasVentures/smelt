@@ -10,11 +10,15 @@ from rich.console import Console
 
 load_dotenv()
 
+from smelt.arch_import import arch_build_command, arch_import_command
 from smelt.config import settings
 from smelt.core import loop
 
 app = typer.Typer(help="Spec-driven autonomous code generation with convergence guarantees.")
 console = Console()
+
+app.command("arch-import")(arch_import_command)
+app.command("arch-build")(arch_build_command)
 
 
 @app.command()
