@@ -1,0 +1,35 @@
+crasis_spec: v1
+name: exception-rewrapping-required
+description: Re-wrap low-level errors into a standard system exception before propagating.
+  This ensures that all exceptions at the system boundary are meaningful and domain-specific.
+task:
+  type: binary_classification
+  trigger: A low-level exception (e.g., socket.error, OSError, library-specific exceptions)
+    is caught but re-raised as-is or not wrapped in a domain-specific exception type
+    before propagating to callers.
+  ignore: Exceptions that are already domain-specific or application-level exceptions.
+    Re-raising with 'raise' alone in a cleanup context. Global error handlers at the
+    application entry point that handle all exception types.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'try: socket.connect(); except socket.error: raise  # Violation - low-level exception
+    not wrapped'
+  - 'try: socket.connect(); except socket.error as e: raise NetworkError(''connection
+    failed'') from e  # Correct - wrapped'
+  - 'try: db.query(); except DatabaseError: raise  # Acceptable - already domain-specific'
+  - 'try: call(); except: cleanup(); raise  # Bare re-raise in cleanup - acceptable'
+  - 'try: file.read(); except IOError as e: logger.error(e); raise ServiceError(''read
+    failed'')  # Correct pattern'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.3'
+  chunk_level: function
+  weight: 0.7
+  mandatory: false

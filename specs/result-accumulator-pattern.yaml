@@ -1,0 +1,40 @@
+crasis_spec: v1
+name: result-accumulator-pattern
+description: All functions that compute and return a value must follow the Result
+  Accumulator Pattern. Declare a single result variable (result) as the first executable
+  statement of the function body. Update result through the logic. Return result exactly
+  once, at the final line. Returning directly from within a conditional branch is
+  prohibited.
+task:
+  type: binary_classification
+  trigger: A function that returns a computed value either returns directly from within
+    a conditional branch without using an accumulator variable, or declares the result
+    accumulator but then includes additional return statements before the final line.
+  ignore: Generator functions that use yield. Functions that only raise exceptions
+    and never return a value. Functions that consist solely of a single return statement
+    with no intermediate logic. Functions that raise exceptions for precondition validation
+    (exceptions are not return points).
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'def func(): if x: return 1; else: return 2  # Violation - no accumulator, conditional
+    returns'
+  - 'def func(): result = 0; if x: result = 1; else: result = 2; return result  #
+    Correct RAP'
+  - 'def func(): if not valid_input(x): raise ValueError(); result = compute(x); return
+    result  # Correct - exception is not a return'
+  - 'def func(): result = None; if x: return early_value; result = compute(); return
+    result  # Violation - early return despite accumulator'
+  - 'def func(): return compute()  # Single statement - no intermediate logic, acceptable'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.4'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

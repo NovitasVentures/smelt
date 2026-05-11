@@ -1,0 +1,36 @@
+crasis_spec: v1
+name: exception-swallowing
+description: Exceptions must be handled at the boundaries, not swallowed within business
+  logic. Exceptions must be logged or re-raised to maintain observability.
+task:
+  type: binary_classification
+  trigger: An except block catches an exception but neither logs it nor re-raises
+    it, causing the error to be silently ignored.
+  ignore: Except blocks that explicitly log the exception before continuing. Except
+    blocks that re-raise the exception or raise a wrapped exception. Except blocks
+    in retry logic where the exception is part of normal control flow and logged at
+    a higher level.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'try: risky(); except NetworkError: pass  # Violation - swallowed'
+  - 'try: risky(); except NetworkError: logger.error(''network failed''); retry()  #
+    Correct - logged'
+  - 'try: risky(); except NetworkError as e: raise SystemError(''wrapped'') from e  #
+    Correct - re-wrapped'
+  - 'try: risky(); except NetworkError: result = None  # Violation - assigned but
+    not logged'
+  - 'for attempt in range(3): try: call(); break; except Timeout: continue  # Retry
+    loop - may be acceptable if logged elsewhere'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.3'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

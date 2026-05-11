@@ -1,0 +1,37 @@
+crasis_spec: v1
+name: single-exit-path
+description: To ensure deterministic execution and simplify the use of debuggers and
+  profilers, all functions must implement a single return point. Initialize a result
+  variable at the top of the function, modify it throughout the logic, and return
+  it exactly once at the final line.
+task:
+  type: binary_classification
+  trigger: A function contains more than one return statement, causing execution to
+    exit at multiple points in the function body rather than at the final line.
+  ignore: Generator functions that use yield statements. Functions that raise exceptions
+    for precondition failures (exception raising is not a return point). Functions
+    that consist of a single return statement with no intermediate logic.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'def func(): return 42  # Single return, no intermediate logic - should this be
+    flagged?'
+  - 'def func(): result = None; if condition: result = 1; else: result = 2; return
+    result  # Correct pattern'
+  - 'def func(): if precondition_fails: raise ValueError(''bad input''); result =
+    compute(); return result  # Exception is not a return'
+  - 'def func(): if x: return 1; return 2  # Clear violation with two returns'
+  - 'def generator(): yield 1; yield 2; return  # Generator with yield - not subject
+    to this rule'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.1'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

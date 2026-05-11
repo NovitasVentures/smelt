@@ -9,7 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from coffeeloop_core.exceptions import InventoryError, NotificationError, OrderError
+from coffeeloop_core.exceptions import InventoryError, NotificationError, OrderError, ReportError
 
 __all__ = [
     "Order",
@@ -19,6 +19,7 @@ __all__ = [
     "OrderError",
     "InventoryError",
     "NotificationError",
+    "ReportError",
 ]
 
 

@@ -1,0 +1,34 @@
+crasis_spec: v1
+name: duplicate-response-envelope-definition
+description: Standard Response envelopes must be imported from the coffeeloop-core
+  library to ensure consistent communication protocols across services.
+task:
+  type: binary_classification
+  trigger: A response wrapper class or response envelope structure is defined locally
+    in a service file instead of being imported from the coffeeloop-core shared library.
+  ignore: Framework-specific response objects (e.g., Flask Response, Django HttpResponse)
+    are acceptable. Internal response transformers that ultimately populate the shared
+    envelope are acceptable.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'class ApiResponse:\n    def __init__(self, data, status): ...  # in gateway/response.py,
+    violates DRY'
+  - 'from coffeeloop_core.protocol import ResponseEnvelope  # Compliant import'
+  - 'from flask import jsonify; return jsonify(data)  # Framework response, acceptable'
+  - '@dataclass\nclass Response:\n    success: bool\n    payload: dict  # Local envelope
+    in notification/api.py, violates DRY'
+  - 'def build_response(data): return ResponseEnvelope(data)  # Uses shared envelope,
+    compliant'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.2'
+  chunk_level: file
+  weight: 0.7
+  mandatory: true

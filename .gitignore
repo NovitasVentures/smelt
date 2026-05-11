@@ -223,7 +223,11 @@ smelt_output/
 .env
 
 # Crasis / arch-import artifacts
-specialists/          # trained ONNX specialist binaries
-specs/                # generated Crasis specs awaiting human review
-.smelt_cache/         # LLM extraction cache
-data/                 # crasis synthetic training data cache
+# trained ONNX specialist binaries
+specialists/
+# generated Crasis specs awaiting human review
+specs/
+# LLM extraction cache
+.smelt_cache/
+# crasis synthetic training data cache
+data/

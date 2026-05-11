@@ -38,6 +38,9 @@ class CrasisScorer(BaseScorer):
         models_dir = str(config.get("models_dir", _DEFAULT_MODELS_DIR))
         threshold = float(config.get("confidence_threshold", _DEFAULT_CONFIDENCE_THRESHOLD))
         mandatory: set[str] = set(config.get("mandatory_principles", []))
+        active_filter: set[str] | None = (
+            set(config["active_specialists"]) if "active_specialists" in config else None
+        )
 
         toolkit = self._load_toolkit(models_dir)
         if not toolkit.specialists():
@@ -60,7 +63,12 @@ class CrasisScorer(BaseScorer):
                 log.warning("Cannot read %s: %s", py_file, exc)
                 continue
 
-            for specialist_name in toolkit.specialists():
+            active_specialists = [
+            s for s in toolkit.specialists()
+            if active_filter is None or s in active_filter
+        ]
+
+        for specialist_name in active_specialists:
                 meta = specialist_meta.get(specialist_name, {})
                 chunk_level = ChunkLevel(meta.get("chunk_level", "function"))
                 weight = float(meta.get("weight", 1.0))
@@ -88,8 +96,9 @@ class CrasisScorer(BaseScorer):
                             ),
                         ))
 
-        n_specialists = len(toolkit.specialists())
-        score = self._aggregate(violations, total_chunks, n_specialists, specialist_meta, mandatory)
+        n_specialists = len(active_specialists)
+        active_meta = {k: v for k, v in specialist_meta.items() if k in set(active_specialists)}
+        score = self._aggregate(violations, total_chunks, n_specialists, active_meta, mandatory)
         return ScoreResult(score=score, violations=violations)
 
     def _load_toolkit(self, models_dir: str) -> CrasisToolkit:
@@ -148,29 +157,36 @@ class CrasisScorer(BaseScorer):
         specialist_meta: dict[str, dict],
         mandatory: set[str],
     ) -> float:
-        """Compute compliance score: fraction of chunks that pass all specialists.
+        """Compute compliance score: fraction of principle weight with zero violations.
 
-        Each chunk that has at least one violation counts as a failing chunk,
-        weighted by the highest-weight principle that fired on it.
-        Score = 1.0 - (sum of per-chunk penalty weights) / n_chunks
+        Score = 1.0 - (sum of weights of violated principles / sum of all weights)
+
+        A principle is violated if ANY chunk triggered it anywhere in the codebase.
+        One hit anywhere counts as a full principle violation, penalized by its weight.
         """
-        if n_chunks == 0:
+        if n_specialists == 0:
             return 1.0
         if not violations:
             return 1.0
 
-        # Group violations by (file, line) — that's the chunk identity in violations
-        chunk_max_weight: dict[tuple[str, int], float] = {}
+        violated: set[str] = set()
         for v in violations:
             rule_parts = v.rule.replace(" [mandatory]", "")
             specialist_name = rule_parts.removeprefix("ARCH:")
-            meta = specialist_meta.get(specialist_name, {})
-            weight = float(meta.get("weight", 1.0))
-            key = (v.file, v.line)
-            chunk_max_weight[key] = max(chunk_max_weight.get(key, 0.0), weight)
+            violated.add(specialist_name)
 
-        penalty = sum(chunk_max_weight.values())
-        return max(0.0, 1.0 - (penalty / n_chunks))
+        total_weight = sum(
+            float(specialist_meta.get(name, {}).get("weight", 1.0))
+            for name in specialist_meta
+        )
+        if total_weight == 0:
+            return 1.0
+
+        violated_weight = sum(
+            float(specialist_meta.get(name, {}).get("weight", 1.0))
+            for name in violated
+        )
+        return max(0.0, 1.0 - violated_weight / total_weight)
 
 
 def _load_specialist_meta(models_dir: str, toolkit: CrasisToolkit) -> dict[str, dict]:

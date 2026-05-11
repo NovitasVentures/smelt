@@ -1,0 +1,33 @@
+crasis_spec: v1
+name: duplicate-error-code-definition
+description: Error codes must be imported from the coffeeloop-core library to prevent
+  schema drift and ensure all services speak the same dialect.
+task:
+  type: binary_classification
+  trigger: Error code constants or enumerations are defined locally in a service file
+    instead of being imported from the coffeeloop-core shared library.
+  ignore: Private error codes used only within a single service's internal modules
+    (not exposed at service boundaries) are acceptable. HTTP status code constants
+    from standard libraries are acceptable.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'ERR_OUT_OF_STOCK = ''E1001''  # in inventory_manager/errors.py, violates DRY'
+  - 'from coffeeloop_core.errors import ErrorCodes  # Compliant import'
+  - 'class InternalErrorCode(Enum): DB_TIMEOUT = 1  # Internal only, acceptable if
+    not crossing boundaries'
+  - 'STOCK_ERROR = ''OUT_OF_STOCK''  # String literal error code, violates DRY'
+  - 'from http import HTTPStatus; return HTTPStatus.NOT_FOUND  # Standard library,
+    acceptable'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.2'
+  chunk_level: file
+  weight: 0.7
+  mandatory: true

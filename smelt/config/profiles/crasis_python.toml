@@ -21,11 +21,19 @@ flags = ["--strict", "--no-error-summary"]
 [scorers.crasis]
 models_dir           = "specialists"
 confidence_threshold = 0.80
+active_specialists   = [
+  "single-exit-path",
+  "bare-except-clause",
+  "swallowed-exception",
+  "missing-exception-rewrap",
+  "result-accumulator-pattern",
+]
 mandatory_principles = [
   "single-exit-path",
   "bare-except-clause",
   "swallowed-exception",
   "missing-exception-rewrap",
+  "result-accumulator-pattern",
 ]
 
 [runners]

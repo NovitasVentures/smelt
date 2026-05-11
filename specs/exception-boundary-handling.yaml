@@ -1,0 +1,41 @@
+crasis_spec: v1
+name: exception-boundary-handling
+description: Exceptions must be handled at the boundaries, not swallowed within business
+  logic. Use specific try...except blocks for expected failures (e.g., Network Timeout).
+  Re-wrap low-level errors into a standard system exception before propagating. Every
+  app must have a Global Error Handler at the entry point to prevent unhandled crashes
+  and ensure logs are formatted correctly.
+task:
+  type: binary_classification
+  trigger: An exception is caught within business logic using a bare except clause,
+    or caught and suppressed without re-raising or re-wrapping, or a specific exception
+    type is caught but not converted to a standard system exception before propagating.
+  ignore: Exception handling at application entry points (global error handlers),
+    exceptions that are caught, logged, and then re-raised without modification, and
+    exceptions caught specifically for cleanup operations (like closing file handles)
+    where the exception is re-raised afterward.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'A function catches Exception or uses bare except: and only logs the error without
+    re-raising'
+  - A function catches a specific NetworkTimeout exception, logs it, and re-raises
+    it as-is instead of wrapping it in a standard system exception
+  - A global error handler at the application entry point that catches all exceptions
+    and formats them for logging
+  - A function catches an exception, performs cleanup (closes a connection), and then
+    re-raises the original exception
+  - A function catches multiple specific exception types but handles them in business
+    logic (updating state) instead of at a boundary
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.3'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

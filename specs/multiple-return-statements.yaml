@@ -1,0 +1,36 @@
+crasis_spec: v1
+name: multiple-return-statements
+description: To ensure deterministic execution and simplify the use of debuggers and
+  profilers, all functions must implement a single return point. Initialize a result
+  variable at the top of the function, modify it throughout the logic, and return
+  it exactly once at the final line.
+task:
+  type: binary_classification
+  trigger: A function contains more than one return statement, causing execution to
+    exit at multiple points in the function body rather than at the final line.
+  ignore: Generator functions using yield are acceptable. Functions that raise exceptions
+    are acceptable, as exceptions are not return statements.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'def validate(x): return True if x > 0 else False  # Has one return with ternary,
+    but grammatically single statement'
+  - 'def process(): result = None; if condition: result = compute(); return result  #
+    Single return, SEiP compliant'
+  - 'def guard_clause(x): if x is None: return None; return expensive_operation(x)  #
+    Two returns, violates SEiP'
+  - 'def gen(): yield 1; yield 2  # Generator with yield, not a return statement'
+  - 'def wrapper(): try: return risky(); except: return fallback()  # Two returns
+    in try/except, violates SEiP'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.1'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

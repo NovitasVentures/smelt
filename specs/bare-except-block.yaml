@@ -1,0 +1,36 @@
+crasis_spec: v1
+name: bare-except-block
+description: Exceptions must be handled at the boundaries, not swallowed within business
+  logic. Use specific try...except blocks for expected failures (e.g., Network Timeout).
+task:
+  type: binary_classification
+  trigger: An except clause does not specify an exception type, using a bare 'except:'
+    that catches all exceptions indiscriminately.
+  ignore: Except clauses that specify Exception or BaseException explicitly with a
+    comment explaining why. Except clauses in global error handlers at application
+    entry points when documented as such.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'try: risky_call(); except: pass  # Clear violation - bare except'
+  - 'try: risky_call(); except NetworkTimeout: log_and_retry()  # Correct - specific
+    exception'
+  - 'try: risky_call(); except Exception as e: log(e); raise  # Explicit Exception
+    with re-raise'
+  - 'try: risky_call(); except KeyError: handle(); except: log(''unknown'')  # Bare
+    except after specific - still violation'
+  - '# Global error handler
+
+    try: main(); except: log_and_exit()  # Documented global handler - may be acceptable'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.3'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

@@ -19,3 +19,7 @@ class InventoryError(CoffeeLoopError):
 
 class NotificationError(CoffeeLoopError):
     """Raised when the Notification Service cannot deliver an event."""
+
+
+class ReportError(CoffeeLoopError):
+    """Raised when report generation fails (invalid input, unknown status)."""

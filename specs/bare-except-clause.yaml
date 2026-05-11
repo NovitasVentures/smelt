@@ -1,0 +1,35 @@
+crasis_spec: v1
+name: bare-except-clause
+description: Exceptions must be handled at the boundaries with specific try...except
+  blocks for expected failures. Bare except clauses swallow all exceptions indiscriminately,
+  preventing proper observability and error propagation.
+task:
+  type: binary_classification
+  trigger: A try block is followed by an except clause with no exception type specified
+    (bare except), catching all exceptions indiscriminately.
+  ignore: 'Re-raising exceptions after logging (try: ... except: log(); raise) is
+    acceptable. Except clauses with specific exception types (except ValueError:)
+    are acceptable.'
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'try:\n    risky()\nexcept:\n    pass  # Bare except, violates principle'
+  - 'try:\n    risky()\nexcept Exception as e:\n    handle(e)  # Specific type, compliant'
+  - 'try:\n    risky()\nexcept:\n    logger.error(''failed'')\n    raise  # Bare except
+    but re-raises, acceptable'
+  - 'try:\n    parse()\nexcept ValueError:\n    return default  # Specific expected
+    failure, compliant'
+  - 'try:\n    call()\nexcept:  # Bare except without re-raise, violates principle\n    return
+    None'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.3'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

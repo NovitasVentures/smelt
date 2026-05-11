@@ -40,9 +40,14 @@ Output ONLY the .cpp test file. No explanation. No markdown fences."""
 
 _BASELINE_GEN_SYSTEM_PYTHON = """\
 You are generating a working Python implementation from a spec and test file.
-The implementation must make the test suite pass — this is used as a baseline \
-for mutation testing, not as the final deliverable.
+The implementation must make ALL tests in the test suite pass — this is used as \
+a baseline for mutation testing, not as the final deliverable.
 Rules:
+- All packages imported by the test file are installed and available. Import and use \
+them exactly as the tests do — do NOT redefine or stub types that are imported from \
+external packages.
+- If tests check isinstance(result, SomeClass) where SomeClass comes from an external \
+package, your implementation must return actual instances of that class.
 - Do NOT use eval(), exec(), or compile() — mutation testing cannot instrument these.
 - Do NOT use import statements inside function bodies — put all imports at module level.
 - Implement the logic directly with plain Python control flow.
@@ -137,12 +142,24 @@ def _run_python(
             test_file.write_text(test_source, encoding="utf-8")
 
             log.info("Phase 1: generating baseline implementation for mutation gate")
+            # Extract all external imports from the test file so the LLM knows
+            # which packages are available as installed dependencies.
+            import re as _re
+            external_imports = sorted(set(_re.findall(
+                r"^(?:from|import)\s+([\w.]+)", test_source, _re.MULTILINE
+            )) - {module_name, "pytest", "unittest", "conftest"})
+            imports_note = (
+                f"\nThe test file imports from these installed packages: "
+                f"{', '.join(external_imports)}. "
+                f"Import and use them directly — do NOT redefine these types locally."
+                if external_imports else ""
+            )
             baseline_source = llm.complete(
                 system=_BASELINE_GEN_SYSTEM_PYTHON,
                 user=(
                     f"SPEC:\n{spec}\n\nTEST FILE:\n{test_source}\n\n"
                     f"Generate a working implementation for module `{module_name}` "
-                    f"that passes the test suite."
+                    f"that passes the test suite.{imports_note}"
                 ),
                 model=config.model,
                 max_tokens=config.max_tokens,
@@ -150,6 +167,7 @@ def _run_python(
 
             baseline_file = tmp_dir / f"{module_name}.py"
             baseline_file.write_text(baseline_source, encoding="utf-8")
+            log.debug("Phase 1: baseline implementation:\n%s", baseline_source)
 
             log.info(
                 "Phase 1: running mutation gate (threshold=%.0f%%)",

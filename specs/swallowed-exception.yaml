@@ -1,0 +1,37 @@
+crasis_spec: v1
+name: swallowed-exception
+description: Exceptions must not be swallowed within business logic. They must be
+  either handled with appropriate recovery logic or propagated to maintain observability
+  across the distributed system.
+task:
+  type: binary_classification
+  trigger: An except block catches an exception but takes no action (empty block or
+    pass statement only), preventing the exception from propagating or being logged.
+  ignore: Except blocks that log the exception before suppressing it are acceptable.
+    Except blocks that perform recovery logic (e.g., return a default value, retry)
+    are acceptable. Explicit suppression with a comment explaining why is acceptable.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'try:\n    fetch()\nexcept NetworkError:\n    pass  # Swallows exception, violates
+    principle'
+  - 'try:\n    fetch()\nexcept NetworkError:\n    logger.warning(''network issue'')\n    pass  #
+    Logs before swallowing, acceptable'
+  - 'try:\n    parse()\nexcept ValueError:\n    return DEFAULT_VALUE  # Recovery logic,
+    compliant'
+  - 'try:\n    optional_feature()\nexcept:\n    pass  # Swallows without explanation,
+    violates principle'
+  - 'try:\n    validate()\nexcept ValidationError:\n    # Intentionally ignore validation
+    for legacy data\n    pass  # Documented suppression, acceptable'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.3'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

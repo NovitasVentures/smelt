@@ -83,6 +83,14 @@ Exceptions must be handled at the boundaries, not swallowed within business logi
 
 ---
 
+### 6.4 Principle: Result Accumulator Pattern (RAP)
+
+All functions that compute and return a value must follow the Result Accumulator Pattern.
+- **Guideline:** Declare a single result variable (`result`) as the first executable statement of the function body. Update `result` through the logic. Return `result` exactly once, at the final line. Returning directly from within a conditional branch is prohibited. Raising an exception for a precondition failure is not a return point and does not violate this rule.
+- **Rationale:** Predictable exit semantics. When a function has multiple return statements scattered through conditional branches, debuggers and profilers attach to only one of them — the others are invisible to step-through execution. A single accumulator-and-return pattern means every tool that attaches to the return sees every execution.
+
+---
+
 ## 7. Architectural Decision Records (ADRs)
 
 ### ADR-001: Hybrid Communication Pattern

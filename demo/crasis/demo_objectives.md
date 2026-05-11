@@ -128,3 +128,56 @@ that drive convergence.
 
 The workflow from SAD to trained specialists takes less than 30 minutes. The specialists
 run at <10ms per chunk, offline, forever.
+
+---
+
+## Demo 4b — Proving Crasis Does Real Work
+
+The CoffeeLoop run (Demo 4a) proved the pipeline end-to-end but exposed a structural
+weakness: **the spec inadvertently made architectural compliance easy**. The exception
+propagation requirements in `coffeeloop_spec.md` are descriptive enough that any LLM
+following them ends up satisfying the architectural principles as a side effect. Crasis
+never fired.
+
+Demo 4b corrects this. The SAD has been extended with **section 6.4 — Result Accumulator
+Pattern (RAP)**: all value-returning functions must declare a `result` variable at the
+top and return it exactly once at the bottom. No early returns from conditional branches.
+
+This principle reliably fires on LLM-generated code because early returns are the LLM's
+natural style — guard clauses, short-circuit returns, and per-branch returns are
+idiomatic Python and are what LLMs produce by default. A behavioral spec that says
+"return True if valid, False otherwise" gives no hint that the implementation must use
+a single accumulator. The LLM writes the natural form; Crasis catches it.
+
+**New component:** `ReportService` — order summary formatting and validation.
+All three methods (`summarize`, `validate`, `compute_totals`) have multiple validation
+paths that will be written with early returns on a naive first pass.
+
+**New files:**
+- `demo/crasis/reportservice_spec.md` — behavioral spec (no architectural hints)
+- `demo/crasis/reportservice_goals.md` — test goals (output correctness only)
+
+**Updated SAD:** `demo/crasis/SAD.md` section 6.4 — feeds into `smelt arch-import`
+to generate the RAP specialist spec.
+
+**Run Demo 4b:**
+
+```bash
+# Re-import SAD to pick up section 6.4
+smelt arch-import --doc demo/crasis/SAD.md --specs-dir specs/
+
+# Review the new result-accumulator-pattern spec, then build
+smelt arch-build --specs-dir specs/ --models-dir specialists/ --confirm
+
+# Run the generation loop against ReportService
+smelt run --spec demo/crasis/reportservice_spec.md \
+          --goals demo/crasis/reportservice_goals.md \
+          --profile smelt/config/profiles/crasis_python.toml \
+          --module reportservice
+```
+
+Expected behavior:
+- **Iteration 1:** Crasis fires on `validate` and `compute_totals` (early returns in
+  conditionals). Compliance score drops below 0.90. CONVERGED blocked.
+- **Iterations 2–3:** LLM refactors to accumulator pattern. Crasis violations clear.
+  All tests pass. CONVERGED.

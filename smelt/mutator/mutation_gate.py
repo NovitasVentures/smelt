@@ -66,6 +66,35 @@ def run(
         shutil.copy(test_path, tests_dir / test_path.name)
 
         subprocess_env = {**os.environ, "PYTHONPATH": pythonpath}
+
+        # Pre-check: if the baseline fails too many tests, mutmut will report 0 mutants.
+        # Allow mutmut to proceed as long as a majority of tests pass — mutmut only
+        # mutates the parts of the implementation that the passing tests exercise.
+        pre = subprocess.run(
+            [sys.executable, "-m", "pytest", str(tests_dir), "-q", "--tb=no", "--no-header"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_dir,
+            env=subprocess_env,
+        )
+        pre_output = pre.stdout + pre.stderr
+        passed_match = __import__("re").search(r"(\d+) passed", pre_output)
+        failed_match = __import__("re").search(r"(\d+) failed", pre_output)
+        n_passed = int(passed_match.group(1)) if passed_match else 0
+        n_failed = int(failed_match.group(1)) if failed_match else 0
+        n_total = n_passed + n_failed
+        if n_total > 0 and n_passed / n_total < 0.5:
+            log.warning(
+                "mutation_gate: baseline passes only %d/%d tests — mutmut cannot run.\n%s",
+                n_passed, n_total, pre_output[-600:],
+            )
+            return 0.0, False
+        if n_failed > 0:
+            log.warning(
+                "mutation_gate: baseline fails %d/%d tests — proceeding with mutmut on passing subset",
+                n_failed, n_total,
+            )
+
         result = subprocess.run(
             [
                 sys.executable, "-m", "mutmut", "run",

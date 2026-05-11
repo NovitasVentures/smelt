@@ -1,0 +1,38 @@
+crasis_spec: v1
+name: missing-exception-rewrap
+description: Low-level errors must be re-wrapped into a standard system exception
+  before propagating to maintain consistent error semantics across service boundaries.
+task:
+  type: binary_classification
+  trigger: A try-except block catches a low-level or third-party exception (e.g.,
+    library-specific errors, OSError, socket errors) and re-raises it directly without
+    wrapping it in a domain-specific or standard system exception.
+  ignore: Re-raising the same exception with additional context (raise ... from) is
+    acceptable if the exception is already a domain exception. Catching and re-raising
+    domain-specific exceptions without modification is acceptable. Letting exceptions
+    propagate uncaught (no except block) is acceptable.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'try:\n    requests.get(url)\nexcept requests.Timeout:\n    raise  # Re-raises
+    library exception directly, violates principle'
+  - 'try:\n    requests.get(url)\nexcept requests.Timeout as e:\n    raise ServiceUnavailableError(''inventory
+    down'') from e  # Wraps in domain exception, compliant'
+  - 'try:\n    socket.connect()\nexcept OSError:\n    raise NetworkError(''connection
+    failed'')  # Wraps low-level error, compliant'
+  - 'try:\n    inventory.check()\nexcept InventoryError:\n    raise  # Already domain
+    exception, acceptable to re-raise'
+  - 'try:\n    db.query()\nexcept DatabaseError as e:\n    logger.error(e)\n    raise  #
+    Logs but re-raises library exception unwrapped, violates principle'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.3'
+  chunk_level: function
+  weight: 1.0
+  mandatory: true

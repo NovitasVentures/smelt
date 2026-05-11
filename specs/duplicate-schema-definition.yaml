@@ -1,0 +1,36 @@
+crasis_spec: v1
+name: duplicate-schema-definition
+description: Logic that bridges two or more applications must be abstracted into a
+  shared architectural core. Data schemas (e.g., the Order object), Error codes, and
+  standard Response envelopes must be imported from the coffeeloop-core library.
+task:
+  type: binary_classification
+  trigger: A data schema class (e.g., Order, ErrorCode, ResponseEnvelope) is defined
+    locally in a service file instead of being imported from the coffeeloop-core shared
+    library.
+  ignore: Private internal models specific to a single service (e.g., database ORM
+    models, internal DTOs not shared across service boundaries) are acceptable. Test
+    fixtures and mock objects are acceptable.
+constraints:
+  max_model_size_mb: 20
+  max_inference_ms: 10
+  connectivity: none
+quality:
+  min_accuracy: 0.93
+  eval_on:
+  - 'class Order: pass  # in order_gateway/models.py — violates DRY, should import
+    from core'
+  - 'from coffeeloop_core.schemas import Order  # Compliant import'
+  - 'class OrderRecord(db.Model): pass  # Internal ORM model, not shared, acceptable'
+  - '@dataclass\nclass Order:\n    id: str\n    items: list  # Local definition in
+    inventory_manager/schema.py, violates DRY'
+  - 'from coffeeloop_core import ErrorCode; MY_ERROR = ErrorCode.INVALID  # Compliant
+    use of shared enum'
+training:
+  strategy: synthetic
+  volume: 3000
+_smelt_meta:
+  source_section: '6.2'
+  chunk_level: file
+  weight: 0.7
+  mandatory: true
