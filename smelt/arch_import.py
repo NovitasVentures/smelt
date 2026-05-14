@@ -73,6 +73,7 @@ def arch_import_command(
 def arch_build_command(
     specs_dir: Path = typer.Option(Path("specs"), "--specs-dir", help="Directory containing Crasis YAML specs."),
     models_dir: Path = typer.Option(Path("specialists"), "--models-dir", help="Output directory for trained ONNX specialists."),
+    profile: Optional[Path] = typer.Option(None, "--profile", help="Profile TOML to read active_specialists from. Only specs listed there will be built."),
     api_key: Optional[str] = typer.Option(None, "--api-key", help="OpenRouter API key (or set OPENROUTER_API_KEY)."),
     confirm: bool = typer.Option(False, "--confirm", help="Required to prevent accidental budget spend."),
 ) -> None:
@@ -80,6 +81,11 @@ def arch_build_command(
 
     Runs crasis build for each spec in --specs-dir. This generates synthetic
     training data (via OpenRouter API) and trains ONNX specialists locally.
+
+    When --profile is given, only the specialists listed under
+    [scorers.crasis] active_specialists in that profile are built. Any spec
+    file not in that list is skipped. This prevents accidentally retraining
+    specialists from other projects when a specs/ directory is shared.
 
     Requires --confirm to prevent accidental training budget spend.
     Requires OPENROUTER_API_KEY env var or --api-key.
@@ -100,6 +106,20 @@ def arch_build_command(
     if not spec_files:
         console.print(f"[bold red]Error:[/] no .yaml files found in {specs_dir}")
         raise typer.Exit(1)
+
+    # Filter spec files to only those declared in the profile's active_specialists.
+    allowed: set[str] | None = _active_specialists_from_profile(profile)
+    if allowed is not None:
+        before = len(spec_files)
+        spec_files = [f for f in spec_files if f.stem in allowed]
+        skipped = before - len(spec_files)
+        console.print(
+            f"Profile filter: [bold]{len(spec_files)}[/] of {before} specs match "
+            f"active_specialists ({skipped} skipped).\n"
+        )
+        if not spec_files:
+            console.print("[bold red]Error:[/] no specs match the profile's active_specialists list.")
+            raise typer.Exit(1)
 
     import os
     resolved_api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
@@ -157,6 +177,29 @@ def arch_build_command(
     console.print(f"\n[bold green]All specialists built.[/] Models in {models_dir}/")
     console.print("\nRun Smelt with the crasis_python profile:")
     console.print("  [dim]smelt run --spec <spec.md> --goals <goals.md> --profile crasis_python[/]")
+
+
+def _active_specialists_from_profile(profile_path: Optional[Path]) -> set[str] | None:
+    """Return the active_specialists set from a profile TOML, or None if no profile given.
+
+    Returns None (no filtering) when profile_path is None.
+    Returns an empty set if the profile exists but declares no active_specialists,
+    which will cause arch-build to error out rather than build everything.
+    """
+    if profile_path is None:
+        return None
+    if not profile_path.exists():
+        console.print(f"[bold red]Error:[/] profile not found: {profile_path}")
+        raise typer.Exit(1)
+    try:
+        import tomllib
+        with open(profile_path, "rb") as f:
+            raw = tomllib.load(f)
+    except Exception as exc:
+        console.print(f"[bold red]Error:[/] cannot read profile {profile_path}: {exc}")
+        raise typer.Exit(1)
+    specialists = raw.get("scorers", {}).get("crasis", {}).get("active_specialists", [])
+    return set(specialists)
 
 
 def _write_smelt_sidecar(specialist_dir: Path, name: str, smelt_meta: dict) -> None:

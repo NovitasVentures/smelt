@@ -1,0 +1,44 @@
+[meta]
+name     = "crasis_k8s"
+language = "python"
+version  = "1.0"
+
+[thresholds]
+compliance = 0.90
+goal       = 1.00
+mutation   = 0.50
+
+[iterations]
+max = 15
+
+[scorers]
+active  = ["ruff", "mypy", "crasis"]
+weights = { ruff = 0.15, mypy = 0.15, crasis = 0.70 }
+
+[scorers.mypy]
+flags = ["--strict", "--no-error-summary"]
+
+[scorers.crasis]
+models_dir           = "specialists"
+specs_dir            = "specs"
+confidence_threshold  = 0.80
+confidence_thresholds = { resource-bounds-required = 0.95, typed-config-objects-required = 0.95 }
+active_specialists   = [
+  "resource-bounds-required",
+  "non-root-enforcement",
+  "privilege-escalation-block",
+  "immutable-rootfs-required",
+  "typed-config-objects-required",
+]
+mandatory_principles = [
+  "resource-bounds-required",
+  "non-root-enforcement",
+  "privilege-escalation-block",
+  "typed-config-objects-required",
+]
+
+[runners]
+framework = "pytest"
+
+[mutator]
+engine = "mutmut"

@@ -36,7 +36,10 @@ class CrasisScorer(BaseScorer):
             mandatory_principles: list[str] — principle names that block CONVERGED
         """
         models_dir = str(config.get("models_dir", _DEFAULT_MODELS_DIR))
-        threshold = float(config.get("confidence_threshold", _DEFAULT_CONFIDENCE_THRESHOLD))
+        default_threshold = float(config.get("confidence_threshold", _DEFAULT_CONFIDENCE_THRESHOLD))
+        per_specialist_thresholds: dict[str, float] = {
+            k: float(v) for k, v in config.get("confidence_thresholds", {}).items()
+        }
         mandatory: set[str] = set(config.get("mandatory_principles", []))
         active_filter: set[str] | None = (
             set(config["active_specialists"]) if "active_specialists" in config else None
@@ -76,6 +79,8 @@ class CrasisScorer(BaseScorer):
 
                 chunks = chunk_code(source, level=chunk_level, filepath=str(py_file))
                 total_chunks += len(chunks)
+
+                threshold = per_specialist_thresholds.get(specialist_name, default_threshold)
 
                 for chunk in chunks:
                     try:

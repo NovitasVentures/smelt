@@ -1,0 +1,13 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "k8s-core"
+version = "0.1.0"
+description = "K8s Secure Deployment shared config types and exceptions — demo stub package"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["k8s_core"]

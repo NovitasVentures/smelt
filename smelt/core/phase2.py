@@ -217,6 +217,7 @@ def run(
             prior_scorer_results=prior_scorer_results,
             prior_goal=prior_goal,
             weights=config.scorer_weights,
+            scorer_config=config.scorer_config,
         )
 
         _assert_no_test_source(prompt, frozen_test_path)
@@ -312,6 +313,7 @@ def _build_prompt(
     prior_scorer_results: dict[str, ScoreResult] | None,
     prior_goal: RunResult | None,
     weights: dict[str, float],
+    scorer_config: dict[str, dict] | None = None,
 ) -> str:
     header = (
         f"SPEC:\n{spec}\n\n"
@@ -327,7 +329,10 @@ def _build_prompt(
     goal_score = prior_goal.goal_score if prior_goal else 0.0
     composite = compliance_score * goal_score
 
-    compliance_section = _format_compliance_failures(prior_scorer_results)
+    crasis_cfg = (scorer_config or {}).get("crasis", {})
+    specs_index = _load_crasis_specs_index(crasis_cfg.get("specs_dir", "specs"))
+
+    compliance_section = _format_compliance_failures(prior_scorer_results, specs_index)
     goal_section = _format_goal_failures(prior_goal)
 
     return (
@@ -339,13 +344,50 @@ def _build_prompt(
     )
 
 
-def _format_compliance_failures(results: dict[str, ScoreResult] | None) -> str:
+def _load_crasis_specs_index(specs_dir: str) -> dict[str, dict]:
+    """Return a dict mapping specialist name → {trigger, ignore} from YAML specs.
+
+    Used to enrich Crasis violation reprompts with the actual rule text.
+    Returns an empty dict silently if specs_dir doesn't exist or a spec can't be read.
+    """
+    import yaml
+
+    index: dict[str, dict] = {}
+    specs_path = Path(specs_dir)
+    if not specs_path.exists():
+        return index
+    for spec_file in specs_path.glob("*.yaml"):
+        try:
+            data = yaml.safe_load(spec_file.read_text(encoding="utf-8"))
+            name = data.get("name", spec_file.stem)
+            task = data.get("task", {})
+            index[name] = {
+                "trigger": task.get("trigger", ""),
+                "ignore": task.get("ignore", ""),
+            }
+        except Exception:
+            pass
+    return index
+
+
+def _format_compliance_failures(
+    results: dict[str, ScoreResult] | None,
+    crasis_specs: dict[str, dict] | None = None,
+) -> str:
     if not results:
         return "  (none)"
     lines: list[str] = []
     for scorer_name, result in results.items():
         for v in result.violations[:20]:
             lines.append(f"  {scorer_name}  {v.rule}  line {v.line}  {v.message}")
+            if scorer_name == "crasis" and crasis_specs:
+                # Strip "ARCH:" prefix and "[mandatory]" suffix to get the specialist name
+                specialist = v.rule.replace(" [mandatory]", "").removeprefix("ARCH:")
+                spec_info = crasis_specs.get(specialist, {})
+                if spec_info.get("trigger"):
+                    lines.append(f"    violation pattern: {spec_info['trigger']}")
+                if spec_info.get("ignore"):
+                    lines.append(f"    compliant patterns: {spec_info['ignore']}")
     if not lines:
         return "  (none)"
     total = sum(len(r.violations) for r in results.values())
