@@ -27,6 +27,7 @@ class CodeChunk:
     signature: str   # "ClassName.method_name" or "function_name" or filename
     level: ChunkLevel
     start_line: int  # for Violation.line mapping
+    mutates_self: bool = True  # False only when AST confirms no self.* mutation
 
 
 def chunk_code(
@@ -81,9 +82,12 @@ def _chunk_functions(source: str, filepath: str) -> list[CodeChunk]:
 
         chunk_text = func_text
         location = f"{filepath}:{node.lineno}-{node.end_lineno}"
+        does_mutate = _mutates_self(node)
 
         if len(chunk_text) > _MAX_CHARS:
             sub = _split_large_chunk(chunk_text, location, signature, filepath, node.lineno, level=ChunkLevel.FUNCTION)
+            for s in sub:
+                s.mutates_self = does_mutate
             chunks.extend(sub)
         else:
             chunks.append(CodeChunk(
@@ -92,6 +96,7 @@ def _chunk_functions(source: str, filepath: str) -> list[CodeChunk]:
                 signature=signature,
                 level=ChunkLevel.FUNCTION,
                 start_line=node.lineno,
+                mutates_self=does_mutate,
             ))
 
     if not chunks:
@@ -236,6 +241,53 @@ def _split_large_chunk(
         ))
 
     return chunks
+
+
+def _mutates_self(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+    """Return True if the function body contains any self.* mutation.
+
+    Detects: self.attr = ..., self.collection.append/extend/add/insert/update/
+    remove/discard/pop/popleft/clear/setdefault(...), del self.attr[...].
+    Does NOT fire on reads: self.attr access without assignment is not mutation.
+    """
+    _MUTATING_CALLS = frozenset({
+        "append", "extend", "add", "insert", "update", "remove",
+        "discard", "pop", "popleft", "clear", "setdefault", "setitem",
+    })
+
+    for node in ast.walk(func_node):
+        # self.x = value  or  self.x += value  etc.
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if _is_self_attr(target):
+                    return True
+        if isinstance(node, ast.AugAssign) and _is_self_attr(node.target):
+            return True
+        if isinstance(node, ast.AnnAssign) and node.value is not None and _is_self_attr(node.target):
+            return True
+        # del self.x  or  del self.x[i]
+        if isinstance(node, ast.Delete):
+            for target in node.targets:
+                if _is_self_attr(target) or (isinstance(target, ast.Subscript) and _is_self_attr(target.value)):
+                    return True
+        # self.collection.mutating_method(...)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr in _MUTATING_CALLS
+            and _is_self_attr(node.func.value)
+        ):
+            return True
+    return False
+
+
+def _is_self_attr(node: ast.expr) -> bool:
+    """True if node is self.something (one level of attribute access on 'self')."""
+    return (
+        isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "self"
+    )
 
 
 def _enclosing_class(tree: ast.Module, func_node: ast.AST) -> str | None:

@@ -82,7 +82,14 @@ class CrasisScorer(BaseScorer):
 
                 threshold = per_specialist_thresholds.get(specialist_name, default_threshold)
 
+                requires_mutation = bool(meta.get("requires_self_mutation", False))
+
                 for chunk in chunks:
+                    # Skip chunks that cannot possibly violate a mutation-requiring principle.
+                    # AST-confirmed pure queries have mutates_self=False; no classifier call needed.
+                    if requires_mutation and not chunk.mutates_self:
+                        continue
+
                     try:
                         result = toolkit.classify(specialist_name, chunk.text)
                     except Exception as exc:
@@ -233,6 +240,7 @@ def _load_specialist_meta(models_dir: str, toolkit: CrasisToolkit) -> dict[str, 
         meta[name] = {
             "chunk_level": sidecar_data.get("chunk_level", "function"),
             "weight": sidecar_data.get("weight", 1.0),
+            "requires_self_mutation": sidecar_data.get("requires_self_mutation", False),
         }
 
     return meta

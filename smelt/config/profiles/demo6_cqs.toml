@@ -1,0 +1,31 @@
+[meta]
+name     = "demo6_cqs"
+language = "python"
+version  = "1.0"
+
+[thresholds]
+compliance = 0.90
+goal       = 1.00
+mutation   = 0.50
+
+[iterations]
+max = 20
+
+[scorers]
+active  = ["ruff", "mypy", "crasis"]
+weights = { ruff = 0.15, mypy = 0.15, crasis = 0.70 }
+
+[scorers.mypy]
+flags = ["--strict", "--no-error-summary"]
+
+[scorers.crasis]
+models_dir           = "specialists"
+confidence_threshold = 0.90
+active_specialists   = ["command-query-separation"]
+mandatory_principles = ["command-query-separation"]
+
+[runners]
+framework = "pytest"
+
+[mutator]
+engine = "mutmut"

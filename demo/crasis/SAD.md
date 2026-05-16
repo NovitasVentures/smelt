@@ -91,6 +91,19 @@ All functions that compute and return a value must follow the Result Accumulator
 
 ---
 
+### 6.5 Principle: Command/Query Separation (CQS)
+
+Every method must be either a command or a query — never both.
+
+- **Command:** mutates state (modifies `self.*` attributes or collections). Returns `None`. Callers that need the new state must issue a separate query.
+- **Query:** reads and returns state. Causes no side effects on `self`. May be called any number of times with identical results.
+
+**Guideline:** If a method appends to, removes from, or reassigns any attribute of `self`, it must not return a value. If a method returns a value, it must not modify any attribute of `self`. The presence of a return type annotation does not satisfy this rule — the body must be free of self-mutation.
+
+**Rationale:** A method that both mutates state and returns the post-mutation state creates invisible coupling between callers. When a command returns state, callers that only need to read that state begin relying on the side-effect path to obtain it — they are forced to trigger a mutation to perform a query. Separating the two roles makes mutation explicit, makes reads safe to call freely, and makes the call graph auditable.
+
+---
+
 ## 7. Architectural Decision Records (ADRs)
 
 ### ADR-001: Hybrid Communication Pattern
