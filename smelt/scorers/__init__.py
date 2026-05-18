@@ -2,6 +2,7 @@
 
 from smelt.scorers.clang_tidy_scorer import ClangTidyScorer
 from smelt.scorers.crasis_scorer import CrasisScorer
+from smelt.scorers.layer_scorer import LayerScorer
 from smelt.scorers.misra_scorer import MisraScorer
 from smelt.scorers.mypy_scorer import MypyScorer
 from smelt.scorers.ruff_scorer import RuffScorer
@@ -12,4 +13,5 @@ SCORER_REGISTRY: dict[str, type] = {
     "misra": MisraScorer,
     "clang_tidy": ClangTidyScorer,
     "crasis": CrasisScorer,
+    "layer": LayerScorer,
 }

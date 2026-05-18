@@ -59,12 +59,17 @@ The trigger is what the classifier fires on. Make it precise and unambiguous.
 Prevents false positives. Examples: generator functions with yield, re-raising exceptions.
 
 "chunk_level": The smallest granularity at which the violation is fully visible. \
-Must be one of: "function", "class", "file", "module".
-  "function" — violation manifests in how a single function is written (call patterns, \
-               return structure, exception handling within the function body)
-  "class"    — violation manifests in how a class is structured (inheritance, composition)
-  "file"     — violation manifests in import statements or module-level definitions
-  "module"   — violation manifests in cross-file dependency direction
+Must be one of: "function", "class", "file", "module", "cross-file".
+  "function"   — violation manifests in how a single function is written (call patterns, \
+                 return structure, exception handling within the function body)
+  "class"      — violation manifests in how a class is structured (inheritance, composition)
+  "file"       — violation manifests in import/include statements or module-level definitions
+  "module"     — violation manifests in cross-file dependency direction within a package
+  "cross-file" — violation is ONLY detectable by examining dependency relationships \
+                 across multiple files simultaneously (e.g. layer isolation: file A \
+                 includes file B from a forbidden layer). No single file inspection \
+                 can determine the violation. Use this when the principle concerns \
+                 the direction of dependencies between architectural layers or modules.
 
 "weight": Importance of this principle, 0.0 to 1.0.
   1.0 if the document uses language like "must", "shall", "required"

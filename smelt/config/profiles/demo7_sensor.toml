@@ -1,0 +1,42 @@
+[meta]
+name     = "demo7_sensor"
+language = "cpp"
+std      = "c++14"
+version  = "1.0"
+
+[thresholds]
+compliance = 0.90
+goal       = 1.00
+mutation   = 0.60
+
+[iterations]
+max = 10
+
+[scorers]
+active  = ["clang_tidy", "crasis", "layer"]
+weights = { clang_tidy = 0.20, crasis = 0.40, layer = 0.40 }
+
+[scorers.clang_tidy]
+checks = "autosar-*,cppcoreguidelines-*,modernize-*,readability-*"
+
+[scorers.crasis]
+models_dir           = "demo/sensor/specialists"
+confidence_threshold = 0.85
+active_specialists   = ["output-parameter-purity"]
+mandatory_principles = ["output-parameter-purity"]
+
+[scorers.layer]
+layers   = ["hal", "processing", "application"]
+allowed  = [
+  { from = "processing",  to = "hal" },
+  { from = "application", to = "processing" },
+]
+mandatory = true
+
+[runners]
+framework = "gtest"
+build     = "cmake"
+build_dir = "build/"
+
+[mutator]
+engine = "mutate++"
