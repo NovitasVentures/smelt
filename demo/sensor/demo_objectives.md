@@ -47,8 +47,9 @@ The SAD declares two mandatory principles:
    All sensor data flows through `processing/`. Enforced by `LayerScorer`.
 
 2. **Output Parameter Purity** (local): functions that communicate results via output
-   parameters must not write those parameters on error return paths. Enforced by the
-   `output-parameter-purity` Crasis ONNX specialist.
+   parameters must not write those parameters on error return paths. Enforced by three
+   Crasis ONNX specialists (`output-param-written-before-error-check`,
+   `output-param-written-on-error-path`, `platform-dependent-integer-types`).
 
 **Why the LLM violates Layer Isolation naturally:** `SensorDispatcher::sample_and_dispatch`
 needs a calibrated, filtered sensor value to compare against a threshold. The direct path
@@ -81,7 +82,8 @@ chunk_level:
   **No ONNX training required.**
 
 - **Output Parameter Purity** → `chunk_level = "function"` → routed to Crasis.
-  Written as `demo/sensor/specs/output-parameter-purity.yaml`.
+  Written as `demo/sensor/specs/output-param-written-before-error-check.yaml`,
+  `output-param-written-on-error-path.yaml`, and `platform-dependent-integer-types.yaml`.
 
 The routing notice printed by `arch-import` makes the enforcement split explicit:
 
@@ -93,7 +95,9 @@ Routing notice: 1 principle requires cross-file dependency analysis.
 ### Step 2 — Human Review Gate
 
 The human reviews:
-- `demo/sensor/specs/output-parameter-purity.yaml` — Crasis spec, validate trigger/ignore/eval_on
+- `demo/sensor/specs/output-param-written-before-error-check.yaml` — Crasis spec, validate trigger/ignore/eval_on
+- `demo/sensor/specs/output-param-written-on-error-path.yaml` — Crasis spec, validate trigger/ignore/eval_on
+- `demo/sensor/specs/platform-dependent-integer-types.yaml` — Crasis spec, validate trigger/ignore/eval_on
 - `demo/sensor/specs/layer-isolation.layer.toml` — confirm layer names and allowed edges match the project structure
 
 The `.layer.toml` snippet for this demo has already been merged into `demo7_sensor.toml`.
@@ -108,14 +112,18 @@ smelt arch-build \
   --confirm
 ```
 
-Trains only the `output-parameter-purity` Crasis specialist (the layer-isolation
-principle does not require training — it runs as a deterministic graph analysis).
+Trains three Crasis specialists (the layer-isolation principle does not require
+training — it runs as a deterministic graph analysis).
 
-Before running `smelt run`, verify the specialist against the method inventory:
+Before running `smelt run`, verify each specialist against the method inventory:
 
 ```bash
 # Verify every method shape in specialist_authoring.md
-crasis classify --model demo/sensor/specialists/output-parameter-purity-onnx/ \
+crasis classify --model demo/sensor/specialists/output-param-written-before-error-check-onnx/ \
+  --text "$(cat <method_snippet>)"
+crasis classify --model demo/sensor/specialists/output-param-written-on-error-path-onnx/ \
+  --text "$(cat <method_snippet>)"
+crasis classify --model demo/sensor/specialists/platform-dependent-integer-types-onnx/ \
   --text "$(cat <method_snippet>)"
 ```
 
@@ -139,10 +147,10 @@ fire:
   application/sensor_dispatcher.cpp includes 'hal/sensor_driver.h' —
   forbidden dependency: 'application' must not depend on 'hal' directly
 
-[ARCH] application/sensor_dispatcher.cpp:24: violates 'output-parameter-purity' [mandatory]
+[ARCH] application/sensor_dispatcher.cpp:24: violates 'output-param-written-before-error-check' [mandatory]
   (87% confidence) — SensorDispatcher::get_last_reading
 
-[ARCH] processing/sensor_processor.cpp:18: violates 'output-parameter-purity' [mandatory]
+[ARCH] processing/sensor_processor.cpp:18: violates 'output-param-written-on-error-path' [mandatory]
   (91% confidence) — SensorProcessor::acquire
 ```
 

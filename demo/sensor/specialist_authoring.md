@@ -1,9 +1,10 @@
 # Output Parameter Purity — Specialist Authoring Guide
 
 This document is the method inventory and eval_on authoring record for the
-`output-parameter-purity` Crasis specialist. It must be complete before the first
-`smelt arch-build` run. See `demo/crasis/specialist_authoring.md` for the full
-process rationale and cost discipline.
+`output-param-written-before-error-check`, `output-param-written-on-error-path`,
+and `platform-dependent-integer-types` Crasis specialists. It must be complete
+before the first `smelt arch-build` run. See `demo/crasis/specialist_authoring.md`
+for the full process rationale and cost discipline.
 
 ---
 

@@ -22,8 +22,16 @@ checks = "autosar-*,cppcoreguidelines-*,modernize-*,readability-*"
 [scorers.crasis]
 models_dir           = "demo/sensor/specialists"
 confidence_threshold = 0.85
-active_specialists   = ["output-parameter-purity"]
-mandatory_principles = ["output-parameter-purity"]
+active_specialists   = [
+  "output-param-written-before-error-check",
+  "output-param-written-on-error-path",
+  "platform-dependent-integer-types",
+]
+mandatory_principles = [
+  "output-param-written-before-error-check",
+  "output-param-written-on-error-path",
+  "platform-dependent-integer-types",
+]
 
 [scorers.layer]
 layers   = ["hal", "processing", "application"]
