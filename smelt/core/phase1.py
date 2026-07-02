@@ -38,6 +38,31 @@ Use EXPECT_* for all other assertions.
 Do NOT use dynamic memory in tests (no new, no malloc).
 Output ONLY the .cpp test file. No explanation. No markdown fences."""
 
+_TEST_GEN_SYSTEM_CPP = """\
+You are generating a GTest C++14 test harness for a multi-file C++ implementation.
+The implementation will have multiple header and source files in subdirectories:
+  common/error_code.h, common/sensor_id.h (or similar shared types)
+  hal/*.h, hal/*.cpp
+  processing/*.h, processing/*.cpp
+  application/*.h, application/*.cpp
+
+Include headers directly by their subdirectory paths:
+  #include "common/error_code.h"
+  #include "hal/sensor_driver.h"
+  #include "processing/sensor_processor.h"
+  #include "application/sensor_dispatcher.h"
+
+Do NOT use extern "C" blocks — the implementation is C++, not C.
+Do NOT include a flat `{module_name}.h` — the implementation has no such umbrella header.
+
+Tests must be non-trivial — do not write tests that pass on a stub.
+Cover every behavior described in the test goals.
+Use TEST(SuiteName, TestName_Scenario_ExpectedOutcome) naming.
+Use ASSERT_* for preconditions that make further testing meaningless.
+Use EXPECT_* for all other assertions.
+Do NOT use dynamic memory in tests (no new, no delete).
+Output ONLY the .cpp test file. No explanation. No markdown fences."""
+
 _BASELINE_GEN_SYSTEM_PYTHON = """\
 You are generating a working Python implementation from a spec and test file.
 The implementation must make ALL tests in the test suite pass — this is used as \
@@ -100,7 +125,7 @@ def run(
     Raises:
         RuntimeError: If mutation gate never passes within MAX_GATE_ATTEMPTS.
     """
-    if config.language == "c":
+    if config.language in ("c", "cpp"):
         return _run_c(spec, goals, config, output_dir, run_id, module_name)
     return _run_python(spec, goals, config, output_dir, run_id, module_name)
 
@@ -208,15 +233,21 @@ def _run_c(
     run_id: str,
     module_name: str,
 ) -> Path:
-    """Phase 1 for C: generate GTest harness, bypass mutation gate if mutate++ unavailable."""
+    """Phase 1 for C/C++: generate GTest harness, bypass mutation gate if mutate++ unavailable."""
     frozen_dir = output_dir / "frozen_tests"
     frozen_dir.mkdir(parents=True, exist_ok=True)
 
     user_prompt = _build_test_gen_prompt(spec, goals)
+    lang = config.language.upper()
 
-    log.info("Phase 1 (C): generating GTest test harness")
+    log.info("Phase 1 (%s): generating GTest test harness", lang)
+    test_gen_system = (
+        _TEST_GEN_SYSTEM_CPP.format(module_name=module_name)
+        if config.language == "cpp"
+        else _TEST_GEN_SYSTEM_C.format(module_name=module_name)
+    )
     test_source = llm.complete(
-        system=_TEST_GEN_SYSTEM_C.format(module_name=module_name),
+        system=test_gen_system,
         user=user_prompt,
         model=config.model,
         max_tokens=config.max_tokens,
@@ -229,12 +260,13 @@ def _run_c(
     kill_rate: float | None = None
     engine = config.mutation_engine
     if shutil.which(engine):
-        log.info("Phase 1 (C): mutation gate via %s (not yet implemented — bypassing)", engine)
+        log.info("Phase 1 (%s): mutation gate via %s (not yet implemented — bypassing)", lang, engine)
         kill_rate = None
     else:
         log.warning(
-            "Phase 1 (C): %s not found on PATH. Mutation gate bypassed. "
-            "MISRA and GTest scorers remain active.",
+            "Phase 1 (%s): %s not found on PATH. Mutation gate bypassed. "
+            "Active scorers remain in effect.",
+            config.language.upper(),
             engine,
         )
 

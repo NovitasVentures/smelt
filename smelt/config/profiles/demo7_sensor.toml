@@ -13,8 +13,13 @@ mutation   = 0.60
 max = 10
 
 [scorers]
-active  = ["clang_tidy", "crasis", "layer"]
-weights = { clang_tidy = 0.20, crasis = 0.40, layer = 0.40 }
+# Crasis disabled: the output-param specialists were built but ONNX export failed
+# for one, and the two that exported have systematic false positives on C++ code
+# (both clean and violating implementations score positive at 95%+ confidence).
+# The specialists need a rebuild with corrected C++ training data before re-enabling.
+# The demo primary claim — LayerScorer catching systemic layer drift — is unaffected.
+active  = ["clang_tidy", "layer"]
+weights = { clang_tidy = 0.30, layer = 0.70 }
 
 [scorers.clang_tidy]
 checks = "autosar-*,cppcoreguidelines-*,modernize-*,readability-*"

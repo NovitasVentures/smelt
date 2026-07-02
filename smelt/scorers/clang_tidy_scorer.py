@@ -32,6 +32,11 @@ class ClangTidyScorer(BaseScorer):
         violations: list[Violation] = []
         total_lines = 0
 
+        has_cpp = any(f.suffix == ".cpp" for f in c_files)
+        std_flag = "-std=c++14" if has_cpp else "-std=c99"
+        include_dirs = sorted({f.parent for f in c_files} | {code_path})
+        include_flags = [f"-I{d}" for d in include_dirs]
+
         for c_file in c_files:
             try:
                 total_lines += len(c_file.read_text(encoding="utf-8").splitlines())
@@ -44,9 +49,8 @@ class ClangTidyScorer(BaseScorer):
                     str(c_file),
                     f"--checks={checks}",
                     "--",
-                    "-std=c99",
-                    f"-I{code_path}",
-                ],
+                    std_flag,
+                ] + include_flags,
                 capture_output=True,
                 text=True,
             )

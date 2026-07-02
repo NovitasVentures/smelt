@@ -10,7 +10,7 @@ from smelt.runners.base import BaseRunner, Failure, RunResult
 
 log = logging.getLogger(__name__)
 
-_CMAKE_TEMPLATE = """\
+_CMAKE_TEMPLATE_C = """\
 cmake_minimum_required(VERSION 3.14)
 project({module_name}_tests C CXX)
 
@@ -39,6 +39,43 @@ target_include_directories({module_name}_test PRIVATE .)
 set_source_files_properties(${{C_SOURCES}} PROPERTIES
     COMPILE_FLAGS "-Wall -Wextra -Wpedantic"
 )
+
+include(GoogleTest)
+gtest_discover_tests({module_name}_test)
+"""
+
+_CMAKE_TEMPLATE_CPP = """\
+cmake_minimum_required(VERSION 3.14)
+project({module_name}_tests CXX)
+
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/v1.14.0.zip
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+# Collect implementation sources from named layer directories only.
+# Never glob from the build directory root to avoid picking up CMake-generated files.
+set(SRC_DIRS hal processing application common)
+set(CPP_SOURCES "")
+foreach(dir IN LISTS SRC_DIRS)
+  if(EXISTS "${{CMAKE_CURRENT_SOURCE_DIR}}/${{dir}}")
+    file(GLOB_RECURSE dir_sources "${{CMAKE_CURRENT_SOURCE_DIR}}/${{dir}}/*.cpp")
+    list(APPEND CPP_SOURCES ${{dir_sources}})
+  endif()
+endforeach()
+file(GLOB CPP_TESTS "${{CMAKE_CURRENT_SOURCE_DIR}}/test_*.cpp")
+
+add_executable({module_name}_test ${{CPP_SOURCES}} ${{CPP_TESTS}})
+
+target_link_libraries({module_name}_test PRIVATE GTest::gtest_main)
+target_include_directories({module_name}_test PRIVATE ${{CMAKE_CURRENT_SOURCE_DIR}})
 
 include(GoogleTest)
 gtest_discover_tests({module_name}_test)
@@ -106,7 +143,9 @@ class GTestRunner(BaseRunner):
         build_dir = code_path / "_build"
         xml_path = code_path / "test_results.xml"
 
-        cmake_content = _CMAKE_TEMPLATE.format(module_name=module_name)
+        has_cpp = any(code_path.rglob("*.cpp")) or any(code_path.rglob("*.h"))
+        cmake_template = _CMAKE_TEMPLATE_CPP if has_cpp else _CMAKE_TEMPLATE_C
+        cmake_content = cmake_template.format(module_name=module_name)
         (code_path / "CMakeLists.txt").write_text(cmake_content)
 
         # Copy frozen test into code dir so cmake finds it

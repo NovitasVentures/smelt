@@ -2,6 +2,7 @@
 
 import ast
 import logging
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -34,18 +35,88 @@ def chunk_code(
     source: str,
     level: ChunkLevel,
     filepath: str = "<unknown>",
+    is_cpp: bool = False,
 ) -> list[CodeChunk]:
-    """Chunk Python source into CodeChunk objects at the requested granularity.
+    """Chunk source into CodeChunk objects at the requested granularity.
 
     For MODULE level, filepath is treated as a directory path and source is ignored.
+    is_cpp=True enables C++ regex-based function chunking instead of Python AST.
     """
     if level == ChunkLevel.MODULE:
         return _chunk_module(filepath)
     if level == ChunkLevel.FILE:
         return _chunk_file(source, filepath)
+    if is_cpp:
+        return _chunk_cpp_functions(source, filepath)
     if level == ChunkLevel.CLASS:
         return _chunk_classes(source, filepath)
     return _chunk_functions(source, filepath)
+
+
+def _chunk_cpp_functions(source: str, filepath: str) -> list[CodeChunk]:
+    """Chunk C++ source into one CodeChunk per function definition.
+
+    Uses brace-matching to extract function bodies. Falls back to FILE chunk
+    if no functions are found (e.g., header-only files with no bodies).
+    """
+    lines = source.splitlines(keepends=True)
+    chunks: list[CodeChunk] = []
+
+    # Matches: ReturnType [ClassName::]FunctionName(...) optionally const/override/noexcept {
+    # Anchored at start of line to skip forward declarations.
+    func_header = re.compile(
+        r"^(?![ \t]*//)(?P<decl>[^\n{};#]+(?:\w+\s*::\s*)?\w+\s*\([^)]*\)"
+        r"(?:\s*(?:const|override|noexcept|final))*)\s*\{",
+        re.MULTILINE,
+    )
+
+    for match in func_header.finditer(source):
+        brace_start = match.end() - 1  # position of '{'
+        depth = 0
+        pos = brace_start
+        while pos < len(source):
+            if source[pos] == "{":
+                depth += 1
+            elif source[pos] == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            pos += 1
+
+        func_text = source[match.start():pos + 1]
+        start_line = source[:match.start()].count("\n") + 1
+        end_line = source[:pos + 1].count("\n") + 1
+
+        # Extract a readable signature: everything up to the opening brace
+        signature = match.group("decl").strip().replace("\n", " ")
+        signature = re.sub(r"\s+", " ", signature)
+
+        # Skip constructors and destructors — they have no return type or error codes.
+        # A constructor/destructor signature has the form "ClassName::ClassName(" or
+        # "ClassName::~ClassName(" — no return type token before the class name.
+        # Detect by checking if the token before "::" is a single word with no preceding type.
+        ctor_match = re.match(r"^(\w+)\s*::\s*~?\1\s*\(", signature)
+        if ctor_match:
+            continue
+
+        location = f"{filepath}:{start_line}-{end_line}"
+
+        if len(func_text) > _MAX_CHARS:
+            sub = _split_large_chunk(func_text, location, signature, filepath, start_line, level=ChunkLevel.FUNCTION)
+            chunks.extend(sub)
+        else:
+            chunks.append(CodeChunk(
+                text=func_text,
+                location=location,
+                signature=signature,
+                level=ChunkLevel.FUNCTION,
+                start_line=start_line,
+            ))
+
+    if not chunks:
+        return _chunk_file(source, filepath)
+
+    return chunks
 
 
 def _chunk_functions(source: str, filepath: str) -> list[CodeChunk]:

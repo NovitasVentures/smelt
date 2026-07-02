@@ -52,6 +52,39 @@ Output the implementation as exactly two sections separated by this delimiter:
 
 No explanation. No markdown fences. Nothing before --- HEADER --- or after the source."""
 
+_GEN_SYSTEM_CPP = """\
+You are generating C++14 source files that will be scored against AUTOSAR and \
+clang-tidy compliance rules and run against a frozen GTest test suite.
+Do not hardcode values to pass specific tests.
+Do not modify test files — they are read-only ground truth.
+Fix the failures described. Do not introduce new ones.
+
+C++14 / AUTOSAR constraints you MUST satisfy:
+- All integer types must be fixed-width types from <cstdint> (int32_t, uint8_t, etc.) \
+  Never use plain int, long, unsigned, or short for variables, parameters, struct members, \
+  or return types. size_t is permitted for container indices and sizeof.
+- Output parameters (pointer or reference): NEVER write to an output parameter before \
+  all error conditions have been checked. Only write after all preconditions pass.
+- No exceptions (-fno-exceptions). Error handling via return codes only.
+- No RTTI (-fno-rtti). No dynamic_cast, typeid.
+- No dynamic memory in operational code (no new/delete after initialization).
+- Use nullptr, not NULL or 0, for null pointers.
+- Use static_cast — no C-style casts.
+- Use enum class — no unscoped enums.
+- constexpr for compile-time constants.
+- [[nodiscard]] on functions returning error codes or resource handles.
+- No using namespace in headers.
+
+Output the implementation as multiple sections, one per file, using this delimiter format:
+--- FILE: <relative/path/to/file.ext> ---
+(file content)
+--- FILE: <relative/path/to/next/file.ext> ---
+(file content)
+
+Include ALL .h and .cpp files needed to compile and pass the tests.
+Create subdirectories: common/, hal/, processing/, application/
+No explanation. No markdown fences. Nothing before the first --- FILE: --- delimiter."""
+
 
 @dataclass
 class IterationRecord:
@@ -86,7 +119,7 @@ def extract_signatures(test_file: Path, language: str = "python") -> str:
     Returns:
         Newline-joined list of test signatures.
     """
-    if language == "c":
+    if language in ("c", "cpp"):
         return _extract_gtest_names(test_file)
 
     source = test_file.read_text(encoding="utf-8")
@@ -137,6 +170,27 @@ def _split_and_write_c(source: str, code_dir: Path, module_name: str) -> None:
     (code_dir / f"{module_name}.c").write_text(source_part, encoding="utf-8")
     if header_part:
         (code_dir / f"{module_name}.h").write_text(header_part, encoding="utf-8")
+
+
+def _split_and_write_cpp(source: str, code_dir: Path) -> None:
+    """Split LLM multi-file output at --- FILE: path --- delimiters and write each file."""
+    pattern = re.compile(r"^---\s*FILE:\s*(.+?)\s*---\s*$", re.MULTILINE)
+    matches = list(pattern.finditer(source))
+
+    if not matches:
+        # Fallback: write raw output as a single .cpp for debugging
+        (code_dir / "sensor_pipeline.cpp").write_text(source, encoding="utf-8")
+        return
+
+    for i, match in enumerate(matches):
+        rel_path = match.group(1).strip()
+        content_start = match.end()
+        content_end = matches[i + 1].start() if i + 1 < len(matches) else len(source)
+        content = source[content_start:content_end].strip()
+
+        dest = code_dir / rel_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(content, encoding="utf-8")
 
 
 def _has_mandatory_violations(scorer_results: dict[str, ScoreResult]) -> bool:
@@ -196,7 +250,12 @@ def run(
     runner = RUNNER_REGISTRY[config.runner]()
     records: list[IterationRecord] = []
 
-    gen_system = _GEN_SYSTEM_C if config.language == "c" else _GEN_SYSTEM_PYTHON
+    if config.language == "c":
+        gen_system = _GEN_SYSTEM_C
+    elif config.language == "cpp":
+        gen_system = _GEN_SYSTEM_CPP
+    else:
+        gen_system = _GEN_SYSTEM_PYTHON
     ext = ".c" if config.language == "c" else ".py"
 
     prior_scorer_results: dict[str, ScoreResult] | None = None
@@ -232,6 +291,8 @@ def run(
 
         if config.language == "c":
             _split_and_write_c(implementation_source, code_dir, module_name)
+        elif config.language == "cpp":
+            _split_and_write_cpp(implementation_source, code_dir)
         else:
             (code_dir / f"{module_name}{ext}").write_text(implementation_source, encoding="utf-8")
 
@@ -475,6 +536,14 @@ def _write_final(
                 (final_dir / f"{module_name}{suffix}").write_text(
                     src.read_text(encoding="utf-8"), encoding="utf-8"
                 )
+    elif language == "cpp":
+        import shutil
+        for src_file in code_dir.rglob("*"):
+            if src_file.is_file() and src_file.suffix in (".cpp", ".h", ".hpp"):
+                rel = src_file.relative_to(code_dir)
+                dest = final_dir / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src_file, dest)
     else:
         (final_dir / f"{module_name}.py").write_text(source, encoding="utf-8")
 

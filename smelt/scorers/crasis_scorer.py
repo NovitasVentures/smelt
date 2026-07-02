@@ -49,44 +49,54 @@ class CrasisScorer(BaseScorer):
         if not toolkit.specialists():
             return ScoreResult(score=1.0, violations=[])
 
+        _CPP_IMPL_EXTENSIONS = {".cpp", ".cc", ".cxx"}
+        _CPP_EXTENSIONS = {".cpp", ".h", ".hpp", ".cc", ".cxx"}
+
+        cpp_files = sorted(
+            f for f in code_path.rglob("*")
+            if f.is_file() and f.suffix in _CPP_IMPL_EXTENSIONS
+            and "_build" not in f.parts
+        )
         py_files = sorted(code_path.rglob("*.py"))
-        if not py_files:
+        source_files = cpp_files if cpp_files else py_files
+
+        if not source_files:
             return ScoreResult(score=1.0, violations=[])
 
         # Load per-specialist metadata (chunk_level, weight)
         specialist_meta = _load_specialist_meta(models_dir, toolkit)
 
-        violations: list[Violation] = []
-        total_chunks = 0
-
-        for py_file in py_files:
-            try:
-                source = py_file.read_text(encoding="utf-8")
-            except OSError as exc:
-                log.warning("Cannot read %s: %s", py_file, exc)
-                continue
-
-            active_specialists = [
+        active_specialists = [
             s for s in toolkit.specialists()
             if active_filter is None or s in active_filter
         ]
 
-        for specialist_name in active_specialists:
+        violations: list[Violation] = []
+        total_chunks = 0
+
+        for src_file in source_files:
+            try:
+                source = src_file.read_text(encoding="utf-8")
+            except OSError as exc:
+                log.warning("Cannot read %s: %s", src_file, exc)
+                continue
+
+            is_cpp = src_file.suffix in _CPP_IMPL_EXTENSIONS
+
+            for specialist_name in active_specialists:
                 meta = specialist_meta.get(specialist_name, {})
                 chunk_level = ChunkLevel(meta.get("chunk_level", "function"))
-                weight = float(meta.get("weight", 1.0))
                 is_mandatory = specialist_name in mandatory
 
-                chunks = chunk_code(source, level=chunk_level, filepath=str(py_file))
+                chunks = chunk_code(
+                    source, level=chunk_level, filepath=str(src_file), is_cpp=is_cpp
+                )
                 total_chunks += len(chunks)
 
                 threshold = per_specialist_thresholds.get(specialist_name, default_threshold)
-
                 requires_mutation = bool(meta.get("requires_self_mutation", False))
 
                 for chunk in chunks:
-                    # Skip chunks that cannot possibly violate a mutation-requiring principle.
-                    # AST-confirmed pure queries have mutates_self=False; no classifier call needed.
                     if requires_mutation and not chunk.mutates_self:
                         continue
 
@@ -99,7 +109,7 @@ class CrasisScorer(BaseScorer):
                     if result["label"] == "positive" and result["confidence"] >= threshold:
                         rule = f"ARCH:{specialist_name} [mandatory]" if is_mandatory else f"ARCH:{specialist_name}"
                         violations.append(Violation(
-                            file=str(py_file),
+                            file=str(src_file),
                             line=chunk.start_line,
                             rule=rule,
                             message=(
