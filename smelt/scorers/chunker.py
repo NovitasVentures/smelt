@@ -62,11 +62,13 @@ def _chunk_cpp_functions(source: str, filepath: str) -> list[CodeChunk]:
     lines = source.splitlines(keepends=True)
     chunks: list[CodeChunk] = []
 
-    # Matches: ReturnType [ClassName::]FunctionName(...) optionally const/override/noexcept {
+    # Matches: [ReturnType] [ClassName::]FunctionName(...) [const/noexcept] [-> TrailingType] {
+    # Handles both traditional (ErrorCode foo()) and trailing-return (auto foo() -> ErrorCode).
     # Anchored at start of line to skip forward declarations.
     func_header = re.compile(
         r"^(?![ \t]*//)(?P<decl>[^\n{};#]+(?:\w+\s*::\s*)?\w+\s*\([^)]*\)"
-        r"(?:\s*(?:const|override|noexcept|final))*)\s*\{",
+        r"(?:\s*(?:const|override|noexcept|final))*"
+        r"(?:\s*->\s*[^\n{};]+)?)\s*\{",
         re.MULTILINE,
     )
 
@@ -90,6 +92,19 @@ def _chunk_cpp_functions(source: str, filepath: str) -> list[CodeChunk]:
         # Extract a readable signature: everything up to the opening brace
         signature = match.group("decl").strip().replace("\n", " ")
         signature = re.sub(r"\s+", " ", signature)
+
+        # Skip control-flow statements that the regex may mis-match as function headers:
+        # for(...), while(...), if(...), switch(...), catch(...), else if(...).
+        # These never have a return type before them.
+        _CONTROL_FLOW = re.compile(
+            r"^(for|while|if|else\s+if|switch|catch|do)\s*\("
+        )
+        if _CONTROL_FLOW.match(signature):
+            continue
+
+        # Skip member initializer lists: lines starting with ":" like ": member_(val)"
+        if signature.startswith(":"):
+            continue
 
         # Skip constructors and destructors — they have no return type or error codes.
         # A constructor/destructor signature has the form "ClassName::ClassName(" or
