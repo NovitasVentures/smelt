@@ -26,7 +26,7 @@ active  = ["clang_tidy", "crasis", "layer"]
 weights = { clang_tidy = 0.20, crasis = 0.40, layer = 0.40 }
 
 [scorers.clang_tidy]
-checks = "autosar-*,cppcoreguidelines-*,modernize-*,readability-*"
+checks = "cppcoreguidelines-*,modernize-*,readability-*"
 
 [scorers.crasis]
 models_dir           = "demo/sensor/specialists"

@@ -34,6 +34,7 @@ checks = "hicpp-*,cert-*,cppcoreguidelines-*,bugprone-*,modernize-*,readability-
 # with imperfect clean/violation separation from mandatory_principles
 # (keep it in active_specialists) and record it in the build history.
 models_dir           = "demo/bms/specialists"
+specs_dir            = "demo/bms/specs"
 confidence_threshold = 0.85
 active_specialists   = [
   "fault-cleared-outside-reset",
@@ -62,10 +63,8 @@ mandatory = true
 framework = "gtest"
 build     = "cmake"
 build_dir = "build/"
-# NOTE (build session): smelt/runners/gtest_runner.py hardcodes
-# SRC_DIRS hal processing application common in _CMAKE_TEMPLATE_CPP.
-# Parameterize from [scorers.layer].layers (+ common) before running this
-# profile, or monitoring/ and supervision/ sources will not be compiled.
+# gtest_runner.py derives SRC_DIRS from [scorers.layer].layers (+ common),
+# so hal/monitoring/supervision are all compiled correctly for this profile.
 
 [mutator]
 engine = "mutate++"

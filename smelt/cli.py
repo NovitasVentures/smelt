@@ -34,6 +34,17 @@ def run(
     module_name: str = typer.Option(
         "implementation", "--module", help="Python module name to generate."
     ),
+    phase1_only: bool = typer.Option(
+        False,
+        "--phase1-only",
+        help="Stop after tests are frozen and the manifest is written. Does not run Phase 2.",
+    ),
+    resume: Optional[Path] = typer.Option(
+        None,
+        "--resume",
+        help="Resume Phase 2 from an existing run directory (e.g. smelt_output/<run_id>). "
+        "Skips Phase 1; verifies the frozen test hash against manifest.json before proceeding.",
+    ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging."),
 ) -> None:
     """Run Smelt: synthesize tests, freeze them, then loop code generation to convergence."""
@@ -46,8 +57,28 @@ def run(
     if not goals.exists():
         console.print(f"[bold red]Error:[/] goals file not found: {goals}")
         raise typer.Exit(1)
+    if phase1_only and resume is not None:
+        console.print("[bold red]Error:[/] --phase1-only and --resume are mutually exclusive.")
+        raise typer.Exit(1)
 
     cfg = settings.load(config_path, profile_path=profile)
+
+    if resume is not None:
+        if not resume.exists():
+            console.print(f"[bold red]Error:[/] resume run directory not found: {resume}")
+            raise typer.Exit(1)
+        try:
+            loop.resume(
+                spec_path=spec,
+                goals_path=goals,
+                config=cfg,
+                console=console,
+                run_dir=resume,
+            )
+        except RuntimeError as exc:
+            console.print(f"[bold red]Resume FAILED:[/] {exc}")
+            raise typer.Exit(1)
+        return
 
     loop.run(
         spec_path=spec,
@@ -55,4 +86,5 @@ def run(
         config=cfg,
         console=console,
         module_name=module_name,
+        phase1_only=phase1_only,
     )

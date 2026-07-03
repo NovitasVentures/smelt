@@ -62,7 +62,7 @@ FetchContent_MakeAvailable(googletest)
 
 # Collect implementation sources from named layer directories only.
 # Never glob from the build directory root to avoid picking up CMake-generated files.
-set(SRC_DIRS hal processing application common)
+set(SRC_DIRS {src_dirs})
 set(CPP_SOURCES "")
 foreach(dir IN LISTS SRC_DIRS)
   if(EXISTS "${{CMAKE_CURRENT_SOURCE_DIR}}/${{dir}}")
@@ -80,6 +80,9 @@ target_include_directories({module_name}_test PRIVATE ${{CMAKE_CURRENT_SOURCE_DI
 include(GoogleTest)
 gtest_discover_tests({module_name}_test)
 """
+
+
+_DEFAULT_SRC_DIRS = ["hal", "processing", "application", "common"]
 
 
 def _find_binary(build_dir: Path, name: str) -> Path | None:
@@ -145,7 +148,13 @@ class GTestRunner(BaseRunner):
 
         has_cpp = any(code_path.rglob("*.cpp")) or any(code_path.rglob("*.h"))
         cmake_template = _CMAKE_TEMPLATE_CPP if has_cpp else _CMAKE_TEMPLATE_C
-        cmake_content = cmake_template.format(module_name=module_name)
+        if cmake_template is _CMAKE_TEMPLATE_CPP:
+            src_dirs = config.get("src_dirs") or _DEFAULT_SRC_DIRS
+            cmake_content = cmake_template.format(
+                module_name=module_name, src_dirs=" ".join(src_dirs)
+            )
+        else:
+            cmake_content = cmake_template.format(module_name=module_name)
         (code_path / "CMakeLists.txt").write_text(cmake_content)
 
         # Copy frozen test into code dir so cmake finds it

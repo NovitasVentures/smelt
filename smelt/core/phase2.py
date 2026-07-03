@@ -301,9 +301,11 @@ def run(
             scorer_results[name] = scorer.score(code_dir, config=config.scorer_config.get(name, {}))
 
         compliance_score = _weighted_compliance(scorer_results, config.scorer_weights)
-        goal_result = runner.run(
-            frozen_test_path, code_dir, config={"module_name": module_name}
-        )
+        runner_config: dict = {"module_name": module_name}
+        layer_cfg = config.scorer_config.get("layer")
+        if layer_cfg and layer_cfg.get("layers"):
+            runner_config["src_dirs"] = list(layer_cfg["layers"]) + ["common"]
+        goal_result = runner.run(frozen_test_path, code_dir, config=runner_config)
         composite = compliance_score * goal_result.goal_score
 
         _write_iteration(iter_dir, scorer_results, goal_result, n, compliance_score, composite)
@@ -317,7 +319,8 @@ def run(
         )
         records.append(record)
 
-        _render(console, record, scorer_results, goal_result, config)
+        has_mandatory = _has_mandatory_violations(scorer_results)
+        _render(console, record, scorer_results, goal_result, config, has_mandatory=has_mandatory)
 
         prior_scorer_results = scorer_results
         prior_goal = goal_result
@@ -325,7 +328,7 @@ def run(
         converged = (
             compliance_score >= config.compliance_threshold
             and goal_result.goal_score >= config.goal_threshold
-            and not _has_mandatory_violations(scorer_results)
+            and not has_mandatory
         )
         if converged:
             _write_final(output_dir, code_dir, module_name, implementation_source, config.language)
@@ -554,6 +557,7 @@ def _render(
     scorer_results: dict[str, ScoreResult],
     goal_result: RunResult,
     config: SmeltConfig,
+    has_mandatory: bool = False,
 ) -> None:
     def bar(score: float, width: int = 10) -> str:
         filled = round(score * width)
@@ -601,11 +605,25 @@ def _render(
     converged = (
         record.compliance_score >= config.compliance_threshold
         and record.goal_score >= config.goal_threshold
+        and not has_mandatory
     )
 
     if converged:
         title = f"[bold green]✓ CONVERGED[/]  iteration {record.n}/{config.max_iterations}"
         border = "green"
+    elif has_mandatory and (
+        record.compliance_score >= config.compliance_threshold
+        and record.goal_score >= config.goal_threshold
+    ):
+        title = (
+            f"[bold red]✗ MANDATORY VIOLATION — NOT CONVERGED[/]  "
+            f"iteration {record.n}/{config.max_iterations}"
+        )
+        border = "red"
+        lines.append(
+            "\n  [bold red]Scores meet threshold, but a mandatory violation blocks "
+            "convergence.[/]"
+        )
     else:
         title = "[bold cyan]Phase 2 — Generation Loop[/]"
         border = "bright_blue"
