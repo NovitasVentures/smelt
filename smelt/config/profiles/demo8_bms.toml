@@ -1,0 +1,71 @@
+[meta]
+name     = "demo8_bms"
+language = "cpp"
+std      = "c++14"
+version  = "1.0"
+
+[thresholds]
+compliance = 0.90
+goal       = 1.00
+mutation   = 0.60
+
+[iterations]
+max = 15   # Demo 4b needed 13 under pure architectural pressure
+
+[scorers]
+active  = ["clang_tidy", "crasis", "layer"]
+weights = { clang_tidy = 0.20, crasis = 0.40, layer = 0.40 }
+
+[scorers.clang_tidy]
+# AUTOSAR C++14-aligned ruleset. Upstream clang-tidy ships no autosar-* checks
+# (verified: the glob matches zero checks on LLVM 18), so the claim is
+# "AUTOSAR-aligned", never "AUTOSAR certified". hicpp (High Integrity C++),
+# cert, and cppcoreguidelines are the closest published supersets of the
+# AUTOSAR C++14 guidance. If iteration-1 clang-tidy detail drowns the
+# architectural failure detail in reprompts, trim readability-* first.
+checks = "hicpp-*,cert-*,cppcoreguidelines-*,bugprone-*,modernize-*,readability-*"
+
+[scorers.crasis]
+# Three NEW specialists trained from demo/bms/SAD.md section 6, plus two
+# specialists reused unchanged from Demo 7 (copied into models_dir, not
+# retrained — delete their arch-import YAMLs before arch-build).
+# Verification gate: every specialist must pass the full classify pass in
+# demo/bms/specialist_authoring.md before smelt run. Demote any specialist
+# with imperfect clean/violation separation from mandatory_principles
+# (keep it in active_specialists) and record it in the build history.
+models_dir           = "demo/bms/specialists"
+confidence_threshold = 0.85
+active_specialists   = [
+  "fault-cleared-outside-reset",
+  "raw-threshold-comparison-in-decision-logic",
+  "state-mutation-in-diagnostic-query",
+  "platform-dependent-integer-types",           # reused (Demo 7: 97.3%, 6/6 C++)
+  "output-param-written-before-error-check",    # reused (Demo 7: 95.7%, 6/6 C++)
+]
+mandatory_principles = [
+  "fault-cleared-outside-reset",
+  "raw-threshold-comparison-in-decision-logic",
+  "state-mutation-in-diagnostic-query",
+  "platform-dependent-integer-types",
+  "output-param-written-before-error-check",
+]
+
+[scorers.layer]
+layers  = ["hal", "monitoring", "supervision"]
+allowed = [
+  { from = "monitoring",  to = "hal" },
+  { from = "supervision", to = "monitoring" },
+]
+mandatory = true
+
+[runners]
+framework = "gtest"
+build     = "cmake"
+build_dir = "build/"
+# NOTE (build session): smelt/runners/gtest_runner.py hardcodes
+# SRC_DIRS hal processing application common in _CMAKE_TEMPLATE_CPP.
+# Parameterize from [scorers.layer].layers (+ common) before running this
+# profile, or monitoring/ and supervision/ sources will not be compiled.
+
+[mutator]
+engine = "mutate++"
