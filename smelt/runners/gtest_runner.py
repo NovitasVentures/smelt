@@ -10,6 +10,38 @@ from smelt.runners.base import BaseRunner, Failure, RunResult
 
 log = logging.getLogger(__name__)
 
+_FAILURE_MESSAGE_CHARS = 4000
+
+
+def _extract_failure_message(stderr: str) -> str:
+    """Pull the actionable part of a cmake/compiler stderr blob.
+
+    A raw tail slice of build output frequently keeps only trailing notes and
+    warnings (e.g. a `[[nodiscard]]` note pointing at an unrelated frozen
+    test) while the actual `error:` line that failed the build scrolled out
+    of the slice — especially with parallel builds, where multiple
+    translation units interleave their output. Reprompting the generator
+    with that tail is reprompting with the wrong failure, which produces
+    exactly the kind of oscillation (fix one thing, break another, forever)
+    this scorer exists to prevent. Filtering for lines containing 'error:'
+    (plus one line of context before/after, for a hint like the offending
+    declaration) keeps the message on the actual defect regardless of where
+    in a large log it appears.
+    """
+    lines = stderr.splitlines()
+    error_line_indices = [i for i, line in enumerate(lines) if "error:" in line]
+    if not error_line_indices:
+        return stderr[-_FAILURE_MESSAGE_CHARS:]
+
+    kept_indices: set[int] = set()
+    for i in error_line_indices:
+        kept_indices.update(range(max(0, i - 1), min(len(lines), i + 2)))
+
+    message = "\n".join(lines[i] for i in sorted(kept_indices))
+    if len(message) > _FAILURE_MESSAGE_CHARS:
+        message = message[:_FAILURE_MESSAGE_CHARS] + "\n... (truncated)"
+    return message
+
 _CMAKE_TEMPLATE_C = """\
 cmake_minimum_required(VERSION 3.14)
 project({module_name}_tests C CXX)
@@ -172,11 +204,16 @@ class GTestRunner(BaseRunner):
             return RunResult(
                 passed=0,
                 failed=1,
-                failures=[Failure("build_failure", configure.stderr[-500:], "")],
+                failures=[Failure("build_failure", _extract_failure_message(configure.stderr), "")],
             )
 
+        # No --parallel: interleaved output from concurrent translation units
+        # makes it unreliable to locate the failing one in the combined
+        # stderr stream. A single-threaded build keeps each file's errors
+        # contiguous, which _extract_failure_message relies on for the
+        # one-line-of-context window around each `error:`.
         build = subprocess.run(
-            ["cmake", "--build", str(build_dir), "--parallel"],
+            ["cmake", "--build", str(build_dir)],
             capture_output=True,
             text=True,
         )
@@ -185,7 +222,7 @@ class GTestRunner(BaseRunner):
             return RunResult(
                 passed=0,
                 failed=1,
-                failures=[Failure("build_failure", build.stderr[-500:], "")],
+                failures=[Failure("build_failure", _extract_failure_message(build.stderr), "")],
             )
 
         binary = _find_binary(build_dir, f"{module_name}_test")

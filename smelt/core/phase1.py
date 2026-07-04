@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from smelt.config.settings import SmeltConfig
+from smelt.core.arithmetic_check import check_test_arithmetic, extract_formulas
 from smelt.llm import client as llm
 from smelt.mutator import mutation_gate
 
@@ -116,6 +117,7 @@ incorrect behavior.
 Regenerate the test file now."""
 
 MAX_GATE_ATTEMPTS = 3
+MAX_ARITHMETIC_ATTEMPTS = 3
 
 
 def run(
@@ -257,7 +259,6 @@ def _run_c(
     user_prompt = _build_test_gen_prompt(spec, goals)
     lang = config.language.upper()
 
-    log.info("Phase 1 (%s): generating GTest test harness", lang)
     if config.language == "cpp":
         layer_cfg = config.scorer_config.get("layer", {})
         test_gen_system = _render_test_gen_system_cpp(
@@ -265,12 +266,50 @@ def _run_c(
         )
     else:
         test_gen_system = _TEST_GEN_SYSTEM_C.format(module_name=module_name)
-    test_source = llm.complete(
-        system=test_gen_system,
-        user=user_prompt,
-        model=config.model,
-        max_tokens=config.max_tokens,
-    )
+
+    # Arithmetic verification: catch wrong expected values for integer
+    # conversions the generator computed by hand (rather than copying a
+    # worked example from the spec) before freezing the test. A frozen test
+    # asserting a wrong value is unfixable by Phase 2 — no implementation
+    # can satisfy it — so this must be caught here, not discovered after
+    # burning the full iteration budget on an unwinnable run.
+    formulas = extract_formulas(spec)
+    test_source = ""
+    for attempt in range(1, MAX_ARITHMETIC_ATTEMPTS + 1):
+        log.info("Phase 1 (%s): generating GTest test harness (attempt %d/%d)", lang, attempt, MAX_ARITHMETIC_ATTEMPTS)
+        test_source = llm.complete(
+            system=test_gen_system,
+            user=user_prompt,
+            model=config.model,
+            max_tokens=config.max_tokens,
+        )
+
+        mismatches = check_test_arithmetic(test_source, formulas)
+        if not mismatches:
+            break
+
+        log.warning(
+            "Phase 1 (%s): %d arithmetic mismatch(es) found in generated test (attempt %d/%d), regenerating",
+            lang, len(mismatches), attempt, MAX_ARITHMETIC_ATTEMPTS,
+        )
+        mismatch_detail = "\n".join(
+            f"- Formula `{m.formula}` applied to input {m.input_value} yields "
+            f"{m.expected_by_formula}, but the test asserts {m.asserted_in_test}. "
+            f"Recompute this value correctly using integer arithmetic."
+            for m in mismatches
+        )
+        user_prompt = (
+            _build_test_gen_prompt(spec, goals)
+            + "\n\nYour previous attempt contained arithmetic errors — recheck every "
+            "numeric literal derived from a spec formula against integer arithmetic, "
+            "not mental estimation:\n" + mismatch_detail
+        )
+    else:
+        log.warning(
+            "Phase 1 (%s): arithmetic mismatches remained after %d attempts; "
+            "freezing the last attempt anyway (no further automatic retries).",
+            lang, MAX_ARITHMETIC_ATTEMPTS,
+        )
 
     frozen_path = frozen_dir / f"test_{module_name}.cpp"
     frozen_path.write_text(test_source, encoding="utf-8")
