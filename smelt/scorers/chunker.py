@@ -329,6 +329,82 @@ def _split_large_chunk(
     return chunks
 
 
+_CPP_KEYWORDS_AND_TYPES = frozenset({
+    "if", "else", "for", "while", "do", "switch", "case", "default", "break",
+    "continue", "return", "goto", "sizeof", "static_cast", "dynamic_cast",
+    "const_cast", "reinterpret_cast", "new", "delete", "this", "nullptr",
+    "true", "false", "void", "bool", "char", "int", "float", "double",
+    "long", "short", "unsigned", "signed", "auto", "const", "static",
+    "volatile", "constexpr", "struct", "class", "enum", "namespace",
+    "using", "typedef", "template", "typename", "public", "private",
+    "protected", "virtual", "override", "final", "explicit", "friend",
+    "inline", "extern", "noexcept", "throw", "try", "catch",
+    "int8_t", "int16_t", "int32_t", "int64_t",
+    "uint8_t", "uint16_t", "uint32_t", "uint64_t", "size_t",
+})
+
+
+def redact_identifiers(text: str) -> str:
+    """Replace class names, function names, and member identifiers with generic
+    placeholders, stable within a single chunk but uninformative across chunks.
+
+    Intended for training/inference of specialists that must reason about
+    control-flow and data-flow shape without learning a shortcut keyed to a
+    specific function or member name (e.g. "any chunk containing the literal
+    token 'update_cell' is clean"). Preserves C++ keywords, built-in types,
+    literals, operators, and enum-qualified values (FaultType::NONE stays
+    intact — only the bare identifier immediately before '::' in a
+    Class::method(...) declaration and trailing-underscore member names are
+    replaced).
+
+    Replacement is deterministic per-chunk: the same source identifier always
+    maps to the same placeholder within one call, so structural relationships
+    (the same member appearing twice) are preserved for the classifier.
+    """
+    class_map: dict[str, str] = {}
+    func_map: dict[str, str] = {}
+    member_map: dict[str, str] = {}
+
+    # ClassName::methodName( — redact both sides of the qualifier.
+    def _redact_decl(match: re.Match) -> str:
+        cls, func = match.group(1), match.group(2)
+        if cls not in class_map:
+            class_map[cls] = f"CLASS_{len(class_map)}"
+        if func not in func_map:
+            func_map[func] = f"FUNC_{len(func_map)}"
+        return f"{class_map[cls]}::{func_map[func]}("
+
+    text = re.sub(r"\b(\w+)\s*::\s*(\w+)\s*\(", _redact_decl, text)
+
+    # Bare function name (no ClassName::) immediately followed by '(' at the
+    # start of a declaration — only rewrite if not already a known keyword,
+    # not a call to a previously-redacted function/class, and not immediately
+    # preceded by '::' (already handled above).
+    def _redact_bare_func(match: re.Match) -> str:
+        name = match.group(1)
+        if name in _CPP_KEYWORDS_AND_TYPES or name in class_map or name in member_map:
+            return match.group(0)
+        if name not in func_map:
+            func_map[name] = f"FUNC_{len(func_map)}"
+        return f"{func_map[name]}("
+
+    text = re.sub(r"(?<!::)\b(\w+)\s*\(", _redact_bare_func, text)
+
+    # Trailing-underscore member identifiers (faults_, last_mv_, valid_, ...),
+    # excluding ALL_CAPS constants (CELL_COUNT) which are not member state.
+    def _redact_member(match: re.Match) -> str:
+        name = match.group(0)
+        if name.isupper():
+            return name
+        if name not in member_map:
+            member_map[name] = f"MEMBER_{len(member_map)}"
+        return member_map[name]
+
+    text = re.sub(r"\b[a-zA-Z_][a-zA-Z0-9_]*_\b", _redact_member, text)
+
+    return text
+
+
 def _mutates_self(func_node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
     """Return True if the function body contains any self.* mutation.
 

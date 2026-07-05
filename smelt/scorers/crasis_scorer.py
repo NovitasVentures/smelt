@@ -7,7 +7,7 @@ from pathlib import Path
 from crasis import CrasisToolkit
 
 from smelt.scorers.base import BaseScorer, ScoreResult, Violation
-from smelt.scorers.chunker import ChunkLevel, chunk_code
+from smelt.scorers.chunker import ChunkLevel, chunk_code, redact_identifiers
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,13 @@ class CrasisScorer(BaseScorer):
             models_dir: path to specialists directory (default: "specialists")
             confidence_threshold: float 0-1, default 0.85
             mandatory_principles: list[str] — principle names that block CONVERGED
+            composites: dict[str, dict] — principle name -> {violation_specialist,
+                exemption_specialist, redact_for_exemption}. A composite principle
+                fires iff violation_specialist fires AND exemption_specialist does
+                NOT fire on the same chunk. Use this when a single small classifier
+                cannot jointly learn a name-conditioned exemption and a data-flow
+                violation pattern without keying on identifier shortcuts — split
+                the two into separate specialists instead of one.
         """
         models_dir = str(config.get("models_dir", _DEFAULT_MODELS_DIR))
         default_threshold = float(config.get("confidence_threshold", _DEFAULT_CONFIDENCE_THRESHOLD))
@@ -44,6 +51,7 @@ class CrasisScorer(BaseScorer):
         active_filter: set[str] | None = (
             set(config["active_specialists"]) if "active_specialists" in config else None
         )
+        composites: dict[str, dict] = config.get("composites", {})
 
         toolkit = self._load_toolkit(models_dir)
         if not toolkit.specialists():
@@ -66,10 +74,17 @@ class CrasisScorer(BaseScorer):
         # Load per-specialist metadata (chunk_level, weight)
         specialist_meta = _load_specialist_meta(models_dir, toolkit)
 
-        active_specialists = [
-            s for s in toolkit.specialists()
-            if active_filter is None or s in active_filter
+        # Principles named in active_specialists may be plain specialists or
+        # composite names. Composite constituents are never scored on their own.
+        composite_names = set(composites.keys())
+        active_principles = [
+            s for s in list(toolkit.specialists()) + list(composite_names)
+            if (active_filter is None or s in active_filter) and s not in _all_constituents(composites)
         ]
+        # Deduplicate while preserving order (a composite name won't also appear
+        # as a raw specialist name since toolkit.specialists() lists constituents).
+        seen: set[str] = set()
+        active_principles = [p for p in active_principles if not (p in seen or seen.add(p))]
 
         violations: list[Violation] = []
         total_chunks = 0
@@ -83,10 +98,22 @@ class CrasisScorer(BaseScorer):
 
             is_cpp = src_file.suffix in _CPP_IMPL_EXTENSIONS
 
-            for specialist_name in active_specialists:
+            for principle_name in active_principles:
+                is_mandatory = principle_name in mandatory
+
+                if principle_name in composites:
+                    composite_violations, n_chunks = self._score_composite(
+                        toolkit, composites[principle_name], principle_name,
+                        specialist_meta, source, src_file, is_cpp, is_mandatory,
+                        per_specialist_thresholds, default_threshold,
+                    )
+                    violations.extend(composite_violations)
+                    total_chunks += n_chunks
+                    continue
+
+                specialist_name = principle_name
                 meta = specialist_meta.get(specialist_name, {})
                 chunk_level = ChunkLevel(meta.get("chunk_level", "function"))
-                is_mandatory = specialist_name in mandatory
 
                 chunks = chunk_code(
                     source, level=chunk_level, filepath=str(src_file), is_cpp=is_cpp
@@ -118,10 +145,80 @@ class CrasisScorer(BaseScorer):
                             ),
                         ))
 
-        n_specialists = len(active_specialists)
-        active_meta = {k: v for k, v in specialist_meta.items() if k in set(active_specialists)}
+        n_specialists = len(active_principles)
+        active_meta = dict(specialist_meta)
+        for composite_name, composite_cfg in composites.items():
+            if composite_name in active_principles:
+                active_meta[composite_name] = _composite_meta(composite_cfg, specialist_meta)
+        active_meta = {k: v for k, v in active_meta.items() if k in set(active_principles)}
         score = self._aggregate(violations, total_chunks, n_specialists, active_meta, mandatory)
         return ScoreResult(score=score, violations=violations)
+
+    def _score_composite(
+        self,
+        toolkit: CrasisToolkit,
+        composite_cfg: dict,
+        principle_name: str,
+        specialist_meta: dict[str, dict],
+        source: str,
+        src_file: Path,
+        is_cpp: bool,
+        is_mandatory: bool,
+        per_specialist_thresholds: dict[str, float],
+        default_threshold: float,
+    ) -> tuple[list[Violation], int]:
+        """Score one composite principle: violation iff violation_specialist fires
+        AND exemption_specialist does not, evaluated per-chunk.
+
+        The exemption specialist is intended to check a name/call-graph condition
+        (e.g. "is this the reset-named exemption function?") on the ORIGINAL chunk
+        text. The violation specialist is intended to check a data-flow condition
+        (e.g. "does this clear fault state as a side effect?") and may be trained
+        on identifier-redacted text (redact_for_exemption: true in config) so it
+        cannot learn a shortcut keyed to a specific function or member name.
+        """
+        violation_specialist = composite_cfg["violation_specialist"]
+        exemption_specialist = composite_cfg["exemption_specialist"]
+        redact_for_violation = bool(composite_cfg.get("redact_for_violation", False))
+
+        meta = specialist_meta.get(violation_specialist, {})
+        chunk_level = ChunkLevel(meta.get("chunk_level", "function"))
+        chunks = chunk_code(source, level=chunk_level, filepath=str(src_file), is_cpp=is_cpp)
+
+        v_threshold = per_specialist_thresholds.get(violation_specialist, default_threshold)
+        e_threshold = per_specialist_thresholds.get(exemption_specialist, default_threshold)
+
+        violations: list[Violation] = []
+        for chunk in chunks:
+            violation_text = redact_identifiers(chunk.text) if redact_for_violation else chunk.text
+
+            try:
+                v_result = toolkit.classify(violation_specialist, violation_text)
+                e_result = toolkit.classify(exemption_specialist, chunk.text)
+            except Exception as exc:
+                log.warning(
+                    "classify() failed for composite '%s' on %s: %s",
+                    principle_name, chunk.location, exc,
+                )
+                continue
+
+            fires = v_result["label"] == "positive" and v_result["confidence"] >= v_threshold
+            exempt = e_result["label"] == "positive" and e_result["confidence"] >= e_threshold
+
+            if fires and not exempt:
+                rule = f"ARCH:{principle_name} [mandatory]" if is_mandatory else f"ARCH:{principle_name}"
+                violations.append(Violation(
+                    file=str(src_file),
+                    line=chunk.start_line,
+                    rule=rule,
+                    message=(
+                        f"violates '{principle_name}' "
+                        f"(violation={v_result['confidence']:.0%}, exemption={e_result['confidence']:.0%}) "
+                        f"— {chunk.signature}"
+                    ),
+                ))
+
+        return violations, len(chunks)
 
     def _load_toolkit(self, models_dir: str) -> CrasisToolkit:
         """Load and cache toolkit from models_dir. Gracefully handles missing dir.
@@ -209,6 +306,27 @@ class CrasisScorer(BaseScorer):
             for name in violated
         )
         return max(0.0, 1.0 - violated_weight / total_weight)
+
+
+def _all_constituents(composites: dict[str, dict]) -> set[str]:
+    """Return every violation_specialist/exemption_specialist name referenced by
+    any composite, so they can be excluded from independent per-specialist scoring."""
+    constituents: set[str] = set()
+    for composite_cfg in composites.values():
+        constituents.add(composite_cfg["violation_specialist"])
+        constituents.add(composite_cfg["exemption_specialist"])
+    return constituents
+
+
+def _composite_meta(composite_cfg: dict, specialist_meta: dict[str, dict]) -> dict:
+    """Derive weight/chunk_level for a composite principle from its violation
+    specialist's metadata (the specialist whose chunk_level governs iteration)."""
+    violation_meta = specialist_meta.get(composite_cfg["violation_specialist"], {})
+    return {
+        "chunk_level": violation_meta.get("chunk_level", "function"),
+        "weight": composite_cfg.get("weight", violation_meta.get("weight", 1.0)),
+        "requires_self_mutation": violation_meta.get("requires_self_mutation", False),
+    }
 
 
 def _load_specialist_meta(models_dir: str, toolkit: CrasisToolkit) -> dict[str, dict]:

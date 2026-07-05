@@ -33,11 +33,20 @@ checks = "hicpp-*,cert-*,cppcoreguidelines-*,bugprone-*,modernize-*,readability-
 # demo/bms/specialist_authoring.md before smelt run. Demote any specialist
 # with imperfect clean/violation separation from mandatory_principles
 # (keep it in active_specialists) and record it in the build history.
+#
+# fault-cleared-outside-reset is a COMPOSITE principle (see [scorers.crasis.composites]
+# below), not a single trained specialist. After 3 retrain rounds (capacity increase,
+# label-contradiction fix, vocabulary-rebalance fix) a single BERT-Mini classifier could
+# not simultaneously learn a name-conditioned exemption and a data-flow violation pattern
+# without keying on identifier shortcuts (e.g. "the literal token 'update_cell' -> clean").
+# Split into reset-name-exemption (pure name/call-graph check) and fault-clearing-dataflow
+# (pure data-flow check on identifier-redacted text, so it structurally cannot learn a
+# name shortcut) — see demo/bms/specialist_authoring.md for the full diagnosis.
 models_dir           = "demo/bms/specialists"
 specs_dir            = "demo/bms/specs"
 confidence_threshold = 0.85
 active_specialists   = [
-  "fault-cleared-outside-reset",
+  "fault-cleared-outside-reset",                # composite: see [scorers.crasis.composites]
   "raw-threshold-comparison-in-decision-logic",
   "state-mutation-in-diagnostic-query",
   "platform-dependent-integer-types",           # reused (Demo 7: 97.3%, 6/6 C++)
@@ -50,6 +59,13 @@ mandatory_principles = [
   "platform-dependent-integer-types",
   "output-param-written-before-error-check",
 ]
+
+[scorers.crasis.composites.fault-cleared-outside-reset]
+# A chunk violates this composite principle iff violation_specialist fires positive
+# AND exemption_specialist does NOT fire positive on the same (unredacted) chunk.
+violation_specialist = "fault-clearing-dataflow"   # data-flow only, trained on redacted text
+exemption_specialist = "reset-name-exemption"      # name/call-graph only, trained on raw text
+redact_for_violation = true                        # redact chunk text before classify() with violation_specialist
 
 [scorers.layer]
 layers  = ["hal", "monitoring", "supervision"]

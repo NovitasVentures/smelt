@@ -8,33 +8,36 @@ Acceptance rule: violation cases must score above 0.85; clean cases must score b
 
 | Case | Expected | Label | Confidence | Score | Verdict | Note |
 |---|---|---|---|---|---|---|
-| `neg__batterysupervisor_ctor.cpp` | negative | negative | 0.9752 | 0.0248 | PASS |  |
-| `neg__cellmonitor_ctor.cpp` | negative | negative | 0.9702 | 0.0298 | PASS |  |
-| `neg__cellsensor_configure.cpp` | negative | negative | 0.9676 | 0.0324 | PASS |  |
-| `neg__cellsensor_ctor.cpp` | negative | negative | 0.9762 | 0.0238 | PASS |  |
-| `neg__fault_count.cpp` | negative | negative | 0.9770 | 0.0230 | PASS |  |
-| `neg__faultmanager_ctor.cpp` | negative | negative | 0.9773 | 0.0227 | PASS |  |
-| `neg__get_last_voltage.cpp` | negative | negative | 0.9767 | 0.0233 | PASS |  |
-| `neg__has_any_fault.cpp` | negative | negative | 0.9764 | 0.0236 | PASS |  |
-| `neg__is_contactor_closed.cpp` | negative | negative | 0.9752 | 0.0248 | PASS |  |
-| `neg__is_ready.cpp` | negative | negative | 0.9772 | 0.0228 | PASS |  |
-| `neg__poll_all.cpp` | negative | negative | 0.9734 | 0.0266 | PASS |  |
-| `neg__poll_cell.cpp` | negative | negative | 0.9748 | 0.0252 | PASS |  |
-| `neg__read_cell_temp.cpp` | negative | negative | 0.9755 | 0.0245 | PASS |  |
-| `neg__read_cell_voltage.cpp` | negative | negative | 0.9758 | 0.0242 | PASS |  |
-| `neg__read_temp_raw.cpp` | negative | negative | 0.9763 | 0.0237 | PASS |  |
-| `neg__read_voltage_raw.cpp` | negative | negative | 0.9764 | 0.0236 | PASS |  |
-| `neg__shape1_reset_faults_loop.cpp` | negative | negative | 0.9770 | 0.0230 | PASS |  |
-| `neg__shape2_update_cell_sets_only.cpp` | negative | negative | 0.9712 | 0.0288 | PASS |  |
-| `neg__shape3_query_local_init.cpp` | negative | positive | 0.7534 | 0.7534 | PASS |  |
-| `neg__shape4_request_reset_delegates.cpp` | negative | negative | 0.9460 | 0.0540 | PASS |  |
-| `neg__to_deci_celsius.cpp` | negative | negative | 0.9739 | 0.0261 | PASS |  |
-| `neg__to_millivolts.cpp` | negative | negative | 0.9762 | 0.0238 | PASS |  |
-| `pos__shape5_update_cell_else_clears.cpp` | positive | negative | 0.9398 | 0.0602 | FAIL | violation case scored 0.0602, required > 0.85 |
-| `pos__shape6_get_cell_fault_read_clears.cpp` | positive | positive | 0.9751 | 0.9751 | PASS |  |
-| `pos__shape7_poll_cell_reinit_before_evaluate.cpp` | positive | negative | 0.9748 | 0.0252 | FAIL | violation case scored 0.0252, required > 0.85 |
+| `neg__batterysupervisor_ctor.cpp` | negative | positive | 0.9932 | 1.0000 | FAIL | clean case scored 1.0000, required < 0.8 [violation=positive(0.9932) exemption=negative(0.9652)] |
+| `neg__cellmonitor_ctor.cpp` | negative | negative | 0.9591 | 0.0000 | PASS | [violation=negative(0.9928) exemption=negative(0.9591)] |
+| `neg__cellsensor_configure.cpp` | negative | negative | 0.9651 | 0.0000 | PASS | [violation=negative(0.9928) exemption=negative(0.9651)] |
+| `neg__cellsensor_ctor.cpp` | negative | positive | 0.9933 | 1.0000 | FAIL | clean case scored 1.0000, required < 0.8 [violation=positive(0.9933) exemption=negative(0.9652)] |
+| `neg__fault_count.cpp` | negative | negative | 0.9655 | 0.0000 | PASS | [violation=negative(0.9927) exemption=negative(0.9655)] |
+| `neg__faultmanager_ctor.cpp` | negative | positive | 0.9936 | 1.0000 | FAIL | clean case scored 1.0000, required < 0.8 [violation=positive(0.9936) exemption=negative(0.9648)] |
+| `neg__get_last_voltage.cpp` | negative | negative | 0.9646 | 0.0000 | PASS | [violation=negative(0.9926) exemption=negative(0.9646)] |
+| `neg__has_any_fault.cpp` | negative | negative | 0.9618 | 0.0000 | PASS | [violation=negative(0.9908) exemption=negative(0.9618)] |
+| `neg__is_contactor_closed.cpp` | negative | negative | 0.9647 | 0.0000 | PASS | [violation=negative(0.9925) exemption=negative(0.9647)] |
+| `neg__is_ready.cpp` | negative | negative | 0.9646 | 0.0000 | PASS | [violation=negative(0.9926) exemption=negative(0.9646)] |
+| `neg__poll_all.cpp` | negative | negative | 0.9644 | 0.0000 | PASS | [violation=negative(0.9924) exemption=negative(0.9644)] |
+| `neg__poll_cell.cpp` | negative | negative | 0.9637 | 0.0000 | PASS | [violation=negative(0.9821) exemption=negative(0.9637)] |
+| `neg__read_cell_temp.cpp` | negative | positive | 0.9494 | 1.0000 | FAIL | clean case scored 1.0000, required < 0.8 [violation=positive(0.9494) exemption=negative(0.9649)] |
+| `neg__read_cell_voltage.cpp` | negative | positive | 0.8709 | 1.0000 | FAIL | clean case scored 1.0000, required < 0.8 [violation=positive(0.8709) exemption=negative(0.9647)] |
+| `neg__read_temp_raw.cpp` | negative | negative | 0.9648 | 0.0000 | PASS | [violation=negative(0.9926) exemption=negative(0.9648)] |
+| `neg__read_voltage_raw.cpp` | negative | negative | 0.9644 | 0.0000 | PASS | [violation=negative(0.9926) exemption=negative(0.9644)] |
+| `neg__shape1_reset_faults_loop.cpp` | negative | negative | 0.9410 | 0.0000 | PASS | [violation=positive(0.9936) exemption=positive(0.9410)] |
+| `neg__shape2_update_cell_sets_only.cpp` | negative | negative | 0.9531 | 0.0000 | PASS | [violation=negative(0.9926) exemption=negative(0.9531)] |
+| `neg__shape3_query_local_init.cpp` | negative | positive | 0.9882 | 1.0000 | FAIL | clean case scored 1.0000, required < 0.8 [violation=positive(0.9882) exemption=negative(0.9643)] |
+| `neg__shape4_request_reset_delegates.cpp` | negative | negative | 0.9613 | 0.0000 | PASS | [violation=negative(0.9771) exemption=negative(0.9613)] |
+| `neg__shape8_reset_faults_range_based_loop.cpp` | negative | negative | 0.9552 | 0.0000 | PASS | [violation=positive(0.9937) exemption=positive(0.9552)] |
+| `neg__shape9_clear_faults_range_based_loop.cpp` | negative | negative | 0.9543 | 0.0000 | PASS | [violation=positive(0.9937) exemption=positive(0.9543)] |
+| `neg__to_deci_celsius.cpp` | negative | negative | 0.9650 | 0.0000 | PASS | [violation=negative(0.9931) exemption=negative(0.9650)] |
+| `neg__to_millivolts.cpp` | negative | negative | 0.9653 | 0.0000 | PASS | [violation=negative(0.9930) exemption=negative(0.9653)] |
+| `pos__shape10_sync_faults_range_based_loop_violation.cpp` | positive | positive | 0.9935 | 1.0000 | PASS | [violation=positive(0.9935) exemption=positive(0.5053)] |
+| `pos__shape5_update_cell_else_clears.cpp` | positive | positive | 0.9393 | 1.0000 | PASS | [violation=positive(0.9393) exemption=negative(0.7555)] |
+| `pos__shape6_get_cell_fault_read_clears.cpp` | positive | positive | 0.9936 | 1.0000 | PASS | [violation=positive(0.9936) exemption=negative(0.9591)] |
+| `pos__shape7_poll_cell_reinit_before_evaluate.cpp` | positive | negative | 0.9637 | 0.0000 | FAIL | violation case scored 0.0000, required > 0.85 [violation=negative(0.9821) exemption=negative(0.9637)] |
 
-**Summary: 23/25 cases passed.**
+**Summary: 21/28 cases passed.**
 
 ## output-param-written-before-error-check
 

@@ -33,6 +33,9 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from smelt.scorers.chunker import redact_identifiers
+
 VERIFICATION_DIR = Path(__file__).resolve().parent
 CASES_DIR = VERIFICATION_DIR / "cases"
 DEFAULT_MODELS_DIR = VERIFICATION_DIR.parent / "specialists"
@@ -45,6 +48,18 @@ NEG_THRESHOLD = 0.80  # clean cases must score strictly below this
 # the nested export structure crasis arch-build produces:
 #   <models-dir>/<specialist>-onnx/<specialist>-onnx/
 MODEL_SUBPATH = "{name}-onnx/{name}-onnx"
+
+# Composite principles: a chunk violates COMPOSITE iff violation_specialist fires
+# positive AND exemption_specialist does not. Cases under cases/<composite_name>/
+# are verified using both underlying specialists rather than a single model dir.
+# Keep in sync with [scorers.crasis.composites] in the active TOML profile.
+COMPOSITES: dict[str, dict[str, object]] = {
+    "fault-cleared-outside-reset": {
+        "violation_specialist": "fault-clearing-dataflow",
+        "exemption_specialist": "reset-name-exemption",
+        "redact_for_violation": True,
+    },
+}
 
 
 @dataclass
@@ -157,6 +172,87 @@ def verify_specialist(name: str, models_dir: Path) -> list[CaseResult]:
     return results
 
 
+def verify_composite(name: str, models_dir: Path) -> list[CaseResult]:
+    """Verify a composite principle: violation iff violation_specialist fires
+    positive AND exemption_specialist does not fire positive, both at the
+    confidence_threshold used by CrasisScorer (0.85, matching POS_THRESHOLD).
+    """
+    case_dir = CASES_DIR / name
+    if not case_dir.is_dir():
+        print(f"warning: no case directory for composite '{name}' at {case_dir}", file=sys.stderr)
+        return []
+
+    composite_cfg = COMPOSITES[name]
+    violation_name = str(composite_cfg["violation_specialist"])
+    exemption_name = str(composite_cfg["exemption_specialist"])
+    redact_for_violation = bool(composite_cfg["redact_for_violation"])
+
+    violation_model_dir = resolve_model_dir(models_dir, violation_name)
+    exemption_model_dir = resolve_model_dir(models_dir, exemption_name)
+    if not violation_model_dir.is_dir() or not exemption_model_dir.is_dir():
+        print(
+            f"warning: missing model dir for composite '{name}' "
+            f"(violation={violation_model_dir}, exemption={exemption_model_dir}) — skipping",
+            file=sys.stderr,
+        )
+        return []
+
+    from crasis import Specialist
+
+    violation_specialist = Specialist.load(violation_model_dir)
+    exemption_specialist = Specialist.load(exemption_model_dir)
+
+    results: list[CaseResult] = []
+    case_files = sorted(case_dir.glob("*.cpp"))
+    if not case_files:
+        print(f"warning: no .cpp case files found in {case_dir}", file=sys.stderr)
+        return []
+
+    for case_file in case_files:
+        expected = expected_from_filename(case_file)
+        if expected is None:
+            print(f"warning: skipping {case_file.name} — does not start with pos__ or neg__", file=sys.stderr)
+            continue
+
+        text = strip_leading_comments(case_file.read_text(encoding="utf-8"))
+        violation_text = redact_identifiers(text) if redact_for_violation else text
+
+        v_outcome = violation_specialist.classify(violation_text)
+        e_outcome = exemption_specialist.classify(text)
+
+        fires = v_outcome["label"] == "positive" and v_outcome["confidence"] >= POS_THRESHOLD
+        exempt = e_outcome["label"] == "positive" and e_outcome["confidence"] >= POS_THRESHOLD
+        composite_positive = fires and not exempt
+
+        # score is the number judge()/the report actually act on: 1.0 when the
+        # composite fires (both conditions hold), 0.0 when it doesn't. label is
+        # kept only for the report table; it mirrors composite_positive.
+        label = "positive" if composite_positive else "negative"
+        score = 1.0 if composite_positive else 0.0
+        confidence = v_outcome["confidence"] if composite_positive else e_outcome["confidence"]
+        verdict, message = judge(expected, score)
+        detail = (
+            f"violation={v_outcome['label']}({v_outcome['confidence']:.4f}) "
+            f"exemption={e_outcome['label']}({e_outcome['confidence']:.4f})"
+        )
+        message = f"{message} [{detail}]" if message else f"[{detail}]"
+
+        results.append(
+            CaseResult(
+                specialist=name,
+                case_file=case_file.name,
+                expected=expected,
+                label=label,
+                confidence=confidence,
+                score=score,
+                verdict=verdict,
+                message=message,
+            )
+        )
+
+    return results
+
+
 def write_report(all_results: dict[str, list[CaseResult]], models_dir: Path) -> None:
     lines: list[str] = []
     lines.append("# Demo 8 BMS — Specialist Verification Report")
@@ -231,7 +327,10 @@ def main() -> int:
     overall_ok = True
 
     for name in specialist_names:
-        results = verify_specialist(name, args.models_dir)
+        if name in COMPOSITES:
+            results = verify_composite(name, args.models_dir)
+        else:
+            results = verify_specialist(name, args.models_dir)
         all_results[name] = results
         if results:
             any_ran = True
