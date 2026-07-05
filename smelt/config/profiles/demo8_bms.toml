@@ -26,9 +26,11 @@ weights = { clang_tidy = 0.20, crasis = 0.40, layer = 0.40 }
 checks = "hicpp-*,cert-*,cppcoreguidelines-*,bugprone-*,modernize-*,readability-*"
 
 [scorers.crasis]
-# Three NEW specialists trained from demo/bms/SAD.md section 6, plus two
-# specialists reused unchanged from Demo 7 (copied into models_dir, not
-# retrained — delete their arch-import YAMLs before arch-build).
+# All five specialists trained fresh from BMS-vocabulary specs. Two of them
+# (platform-dependent-integer-types, output-param-written-before-error-check)
+# enforce the same English rules as Demo 7, but direct reuse of the Demo 7
+# models failed verification on 2026-07-03 — the rules transferred, the
+# weights didn't, so both were retrained against this project's vocabulary.
 # Verification gate: every specialist must pass the full classify pass in
 # demo/bms/specialist_authoring.md before smelt run. Demote any specialist
 # with imperfect clean/violation separation from mandatory_principles
@@ -39,9 +41,15 @@ checks = "hicpp-*,cert-*,cppcoreguidelines-*,bugprone-*,modernize-*,readability-
 # label-contradiction fix, vocabulary-rebalance fix) a single BERT-Mini classifier could
 # not simultaneously learn a name-conditioned exemption and a data-flow violation pattern
 # without keying on identifier shortcuts (e.g. "the literal token 'update_cell' -> clean").
-# Split into reset-name-exemption (pure name/call-graph check) and fault-clearing-dataflow
-# (pure data-flow check on identifier-redacted text, so it structurally cannot learn a
-# name shortcut) — see demo/bms/specialist_authoring.md for the full diagnosis.
+# Resolution (2026-07-05, hybrid decomposition): the rule's deterministic clauses are
+# compiled into deterministic checks — the exact-name exemption is a signature comparison
+# (exemption_signatures) and the "touches fault state at all" trigger clause is a token
+# gate (trigger_patterns) — while the judgment call ("does this path actually clear
+# fault state?") stays with the fault-clearing-dataflow specialist, trained on
+# identifier-redacted text so it structurally cannot learn a name shortcut.
+# An earlier revision used a trained reset-name-exemption specialist for the name
+# check; it was retired — a BERT model doing string comparison is the wrong tier.
+# See demo/bms/specialist_authoring.md for the full diagnosis and build history.
 models_dir           = "demo/bms/specialists"
 specs_dir            = "demo/bms/specs"
 confidence_threshold = 0.85
@@ -49,23 +57,43 @@ active_specialists   = [
   "fault-cleared-outside-reset",                # composite: see [scorers.crasis.composites]
   "raw-threshold-comparison-in-decision-logic",
   "state-mutation-in-diagnostic-query",
-  "platform-dependent-integer-types",           # reused (Demo 7: 97.3%, 6/6 C++)
-  "output-param-written-before-error-check",    # reused (Demo 7: 95.7%, 6/6 C++)
+  "platform-dependent-integer-types",           # Demo 7 rule, retrained on BMS vocabulary (28/28)
+  "output-param-written-before-error-check",    # Demo 7 rule, retrained on BMS vocabulary (23/28 — see below)
 ]
+# output-param-written-before-error-check is NOT mandatory: verification shows
+# imperfect clean/violation separation (5 false positives on spec-API
+# conversion/read functions, report.md 2026-07-05). Per the demotion policy
+# above it stays active (scores, appears in the trace) but cannot block
+# CONVERGED. Recorded in demo/bms/specialist_authoring.md build history.
 mandatory_principles = [
   "fault-cleared-outside-reset",
   "raw-threshold-comparison-in-decision-logic",
   "state-mutation-in-diagnostic-query",
   "platform-dependent-integer-types",
-  "output-param-written-before-error-check",
 ]
 
 [scorers.crasis.composites.fault-cleared-outside-reset]
-# A chunk violates this composite principle iff violation_specialist fires positive
-# AND exemption_specialist does NOT fire positive on the same (unredacted) chunk.
-violation_specialist = "fault-clearing-dataflow"   # data-flow only, trained on redacted text
-exemption_specialist = "reset-name-exemption"      # name/call-graph only, trained on raw text
+# A chunk violates this composite principle iff it passes the trigger gate, is not
+# name-exempt, AND violation_specialist fires positive. Trigger patterns and the
+# exemption run on the UNREDACTED chunk; the specialist classifies redacted text.
+violation_specialist = "fault-clearing-dataflow"   # data-flow judgment, trained on redacted text
+# SAD 6.2 exempts exactly these function names — a string comparison, not a
+# learning problem (checked against CodeChunk.signature's method name).
+exemption_signatures = ["reset_faults", "clear_faults"]
+# Transcription of the rule's trigger clause: a function that never assigns to a
+# member, never loops over a member container, and never invokes a clearing-idiom
+# call is structurally incapable of clearing fault state — skipped, no model call.
+trigger_patterns = [
+  '\b\w+_\s*(?:\[[^\]]*\]\s*)?(?:[&|^]?=)(?!=)',        # assignment to trailing-underscore member or element
+  ':\s*\w+_\s*\)',                                       # range-based loop over a member container
+  '\b(?:\w+_\s*\.\s*)?(?:reset|clear|fill|assign)\w*\s*\(',  # clearing-idiom call, bare or member-qualified
+]
 redact_for_violation = true                        # redact chunk text before classify() with violation_specialist
+# The rule's own vocabulary survives redaction: whether a call is to a
+# reset/clear-named routine is what the delegation judgment turns on —
+# redacting those call names makes "delegates to a clearing routine" and
+# "delegates to anything else" the same text with opposite labels.
+redaction_preserve_prefixes = ["reset", "clear"]
 
 [scorers.layer]
 layers  = ["hal", "monitoring", "supervision"]

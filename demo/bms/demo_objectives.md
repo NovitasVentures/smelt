@@ -13,20 +13,32 @@ three tiers:
 | Principle (SAD §) | Tier | Enforcer | Trained? |
 |---|---|---|---|
 | Layer Isolation (6.1) | Systemic | LayerScorer (dependency graph) | No — deterministic |
-| Fault Latching Discipline (6.2) | Local | Crasis ONNX `fault-cleared-outside-reset` | NEW |
+| Fault Latching Discipline (6.2) | Local | Composite: deterministic name-exemption + trigger gate around Crasis ONNX `fault-clearing-dataflow` | HYBRID |
 | Raw Value Quarantine (6.3) | Local | Crasis ONNX `raw-threshold-comparison-in-decision-logic` | NEW |
 | Diagnostic Query Purity (6.4) | Local | Crasis ONNX `state-mutation-in-diagnostic-query` | NEW |
-| Output Parameter Purity (6.5) | Local | Crasis ONNX `output-param-written-before-error-check` | REUSED from Demo 7 |
-| Fixed-Width Types (ADR-002) | Local | Crasis ONNX `platform-dependent-integer-types` | REUSED from Demo 7 |
+| Output Parameter Purity (6.5) | Local | Crasis ONNX `output-param-written-before-error-check` | Demo 7 rule, retrained (non-mandatory — see build history) |
+| Fixed-Width Types (ADR-002) | Local | Crasis ONNX `platform-dependent-integer-types` | Demo 7 rule, retrained |
 | C++14 style baseline | Syntactic | clang-tidy (hicpp/cert/cppcoreguidelines) | No |
 
 Core claims:
 
 1. **If a safety rule can be written in English, Smelt can enforce it in code.**
-   Three new specialists are trained from SAD sentences; no rule engine, no AST
-   pattern DSL, no hand-written checker.
-2. **Compliance knowledge transfers.** Two of the five specialists were trained on
-   a different project (Demo 7's sensor pipeline) and are reused unchanged.
+   Smelt *compiles* each rule into the cheapest sufficient enforcement: the parts
+   of a rule that are deterministic structure — layer boundaries, exact function
+   names, "contains an assignment at all" — become deterministic checks, and the
+   parts that require judgment — "does this code path actually clear fault
+   state?" — become trained specialists. No rule engine and no hand-written AST
+   DSL for the judgment calls; no neural network doing string comparison either.
+   (This decomposition is itself a finding of this demo: five diagnostic rounds
+   proved a single small classifier cannot learn a name-conditioned exemption and
+   an identifier-blind data-flow judgment simultaneously — see
+   `specialist_authoring.md` build history.)
+2. **The English rule transfers; the weights don't.** Two of the five rules were
+   written for Demo 7's sensor pipeline and reused verbatim as English. Direct
+   reuse of their trained models failed verification against BMS vocabulary
+   (2026-07-03), so both were retrained from the same spec text — the compliance
+   *knowledge* carried over, the classifier weights did not. That asymmetry is the
+   honest transferability result.
 3. **This closes the last language box on the roadmap:** C++14 / AUTOSAR-aligned /
    GTest, on the infrastructure built for Demo 7.
 
@@ -122,20 +134,21 @@ no training). The routing notice printed by arch-import makes the split explicit
   `raw-threshold-comparison-in-decision-logic`,
   `state-mutation-in-diagnostic-query`) — Demo 7 lost a full commit (f47045b) to
   name drift between specs, profile, and built specialists.
-- **Delete the generated YAMLs for the two reused specialists**
+- ~~**Delete the generated YAMLs for the two reused specialists**
   (`output-param-written-before-error-check`, `platform-dependent-integer-types`) —
-  their models are copied from Demo 7, not retrained. Leaving the YAMLs in place
-  would make arch-build retrain them (~3000 API calls each, wasted).
+  their models are copied from Demo 7, not retrained.~~
+  **Superseded 2026-07-03:** direct reuse of the Demo 7 models failed
+  verification against BMS vocabulary; both were retrained from their YAMLs
+  like the other three (see claim 2 and `specialist_authoring.md`).
 - Confirm `layer-isolation.layer.toml` matches the `[scorers.layer]` block in
   `demo8_bms.toml` (layers: hal, monitoring, supervision).
 
 ### Step 3 — `smelt arch-build` + verification
 
 ```bash
-cp -r demo/sensor/specialists/output-param-written-before-error-check-onnx \
-      demo/sensor/specialists/platform-dependent-integer-types-onnx \
-      demo/bms/specialists/
-
+# (The original plan copied the two Demo 7 models here instead of retraining
+# them — superseded 2026-07-03 when reuse failed verification; all five
+# specialists build from demo/bms/specs/.)
 smelt arch-build \
   --specs-dir demo/bms/specs/ \
   --models-dir demo/bms/specialists/ \
@@ -206,7 +219,11 @@ pressure).
   in this suite could catch it — the architecture document did."
 - "We wrote the safety rule in English. Twenty minutes later it was a 4 MB ONNX
   model rejecting non-compliant C++."
-- "Two of the five compliance specialists were trained on a different project and
-  reused unchanged."
+- "Two of the five safety rules were written for a different project and reused
+  verbatim — the English transferred, the weights didn't. Retraining a rule
+  is a config change, not an engineering project."
+- "We spent five rounds trying to teach a 4 MB model a string comparison. Then we
+  let the string comparison be a string comparison and let the model judge the
+  data flow. Know what each tier is for."
 - The trace table (iteration × compliance × goal × violations) is the visual: tests
   green from iteration 1, compliance climbing until the mandatory violations clear.

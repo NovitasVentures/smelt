@@ -227,6 +227,8 @@ smelt_output/
 specialists/
 # generated Crasis specs awaiting human review
 specs/
+# retired specialist models/specs kept for reference (session-local, like the above)
+demo/*/retired/
 # LLM extraction cache
 .smelt_cache/
 # crasis synthetic training data cache

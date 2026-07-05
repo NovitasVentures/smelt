@@ -344,7 +344,7 @@ _CPP_KEYWORDS_AND_TYPES = frozenset({
 })
 
 
-def redact_identifiers(text: str) -> str:
+def redact_identifiers(text: str, preserve_prefixes: tuple[str, ...] = ()) -> str:
     """Replace class names, function names, and member identifiers with generic
     placeholders, stable within a single chunk but uninformative across chunks.
 
@@ -357,6 +357,14 @@ def redact_identifiers(text: str) -> str:
     Class::method(...) declaration and trailing-underscore member names are
     replaced).
 
+    preserve_prefixes: function names starting with any of these prefixes are
+    NOT redacted, in either declaration or call position. Use this for a
+    rule's own vocabulary — e.g. a fault-latching rule whose meaning turns on
+    whether a call is to a reset/clear-named routine needs those call names to
+    survive redaction, or "delegates to a clearing routine" and "delegates to
+    anything else" become the same text with opposite labels (unlearnable).
+    Project-specific identifiers must never be listed here.
+
     Replacement is deterministic per-chunk: the same source identifier always
     maps to the same placeholder within one call, so structural relationships
     (the same member appearing twice) are preserved for the classifier.
@@ -365,11 +373,16 @@ def redact_identifiers(text: str) -> str:
     func_map: dict[str, str] = {}
     member_map: dict[str, str] = {}
 
+    def _preserved(name: str) -> bool:
+        return any(name.lower().startswith(p.lower()) for p in preserve_prefixes)
+
     # ClassName::methodName( — redact both sides of the qualifier.
     def _redact_decl(match: re.Match) -> str:
         cls, func = match.group(1), match.group(2)
         if cls not in class_map:
             class_map[cls] = f"CLASS_{len(class_map)}"
+        if _preserved(func):
+            return f"{class_map[cls]}::{func}("
         if func not in func_map:
             func_map[func] = f"FUNC_{len(func_map)}"
         return f"{class_map[cls]}::{func_map[func]}("
@@ -383,6 +396,8 @@ def redact_identifiers(text: str) -> str:
     def _redact_bare_func(match: re.Match) -> str:
         name = match.group(1)
         if name in _CPP_KEYWORDS_AND_TYPES or name in class_map or name in member_map:
+            return match.group(0)
+        if _preserved(name):
             return match.group(0)
         if name not in func_map:
             func_map[name] = f"FUNC_{len(func_map)}"

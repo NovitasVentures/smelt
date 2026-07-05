@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 
 from crasis import CrasisToolkit
@@ -34,13 +35,32 @@ class CrasisScorer(BaseScorer):
             models_dir: path to specialists directory (default: "specialists")
             confidence_threshold: float 0-1, default 0.85
             mandatory_principles: list[str] — principle names that block CONVERGED
-            composites: dict[str, dict] — principle name -> {violation_specialist,
-                exemption_specialist, redact_for_exemption}. A composite principle
-                fires iff violation_specialist fires AND exemption_specialist does
-                NOT fire on the same chunk. Use this when a single small classifier
-                cannot jointly learn a name-conditioned exemption and a data-flow
-                violation pattern without keying on identifier shortcuts — split
-                the two into separate specialists instead of one.
+            composites: dict[str, dict] — principle name -> composite config.
+                A composite principle fires iff its violation_specialist fires
+                AND the chunk is not exempt. Keys:
+                  violation_specialist: specialist name (required)
+                  exemption_specialist: specialist name — learned exemption,
+                      checked on the unredacted chunk
+                  exemption_signatures: list[str] — deterministic exemption:
+                      chunks whose method name (from CodeChunk.signature)
+                      matches exactly are never violations. Use this when the
+                      rule's exemption clause names exact functions — a string
+                      comparison, not a learning problem.
+                  (exactly one of exemption_specialist/exemption_signatures)
+                  trigger_patterns: list[str] — optional deterministic gate:
+                      regexes applied to the UNREDACTED chunk text; the
+                      violation specialist only evaluates chunks matching at
+                      least one. Chunks matching none are structurally
+                      incapable of violating the rule and are skipped without
+                      a model call.
+                  redact_for_violation: bool — classify the violation
+                      specialist on identifier-redacted text so it cannot
+                      learn identifier shortcuts.
+                Use a composite when a single small classifier cannot jointly
+                learn a name-conditioned exemption and a data-flow violation
+                pattern without keying on identifier shortcuts — compile the
+                deterministic parts of the rule into the gate/exemption and
+                let the model judge only what requires judgment.
         """
         models_dir = str(config.get("models_dir", _DEFAULT_MODELS_DIR))
         default_threshold = float(config.get("confidence_threshold", _DEFAULT_CONFIDENCE_THRESHOLD))
@@ -168,33 +188,50 @@ class CrasisScorer(BaseScorer):
         default_threshold: float,
     ) -> tuple[list[Violation], int]:
         """Score one composite principle: violation iff violation_specialist fires
-        AND exemption_specialist does not, evaluated per-chunk.
+        AND the chunk is not exempt, evaluated per-chunk.
 
-        The exemption specialist is intended to check a name/call-graph condition
-        (e.g. "is this the reset-named exemption function?") on the ORIGINAL chunk
-        text. The violation specialist is intended to check a data-flow condition
-        (e.g. "does this clear fault state as a side effect?") and may be trained
-        on identifier-redacted text (redact_for_exemption: true in config) so it
-        cannot learn a shortcut keyed to a specific function or member name.
+        Deterministic tiers run first, on the ORIGINAL chunk text/signature:
+        trigger_patterns gate which chunks the violation specialist sees at all,
+        and exemption_signatures exempt exact method names without a model call.
+        The violation specialist checks the data-flow condition (e.g. "does this
+        clear fault state as a side effect?") and may be trained on
+        identifier-redacted text (redact_for_violation: true) so it cannot learn
+        a shortcut keyed to a specific function or member name. A learned
+        exemption_specialist (mutually exclusive with exemption_signatures) is
+        checked on the unredacted chunk after the violation specialist fires.
         """
         violation_specialist = composite_cfg["violation_specialist"]
-        exemption_specialist = composite_cfg["exemption_specialist"]
+        exemption_specialist = composite_cfg.get("exemption_specialist")
+        exemption_signatures = composite_cfg.get("exemption_signatures")
+        if (exemption_specialist is None) == (exemption_signatures is None):
+            raise ValueError(
+                f"composite '{principle_name}' must configure exactly one of "
+                "'exemption_specialist' or 'exemption_signatures'"
+            )
+        exempt_names = set(exemption_signatures or [])
+        trigger_patterns = [re.compile(p) for p in composite_cfg.get("trigger_patterns", [])]
         redact_for_violation = bool(composite_cfg.get("redact_for_violation", False))
+        preserve_prefixes = tuple(composite_cfg.get("redaction_preserve_prefixes", []))
 
         meta = specialist_meta.get(violation_specialist, {})
         chunk_level = ChunkLevel(meta.get("chunk_level", "function"))
         chunks = chunk_code(source, level=chunk_level, filepath=str(src_file), is_cpp=is_cpp)
 
         v_threshold = per_specialist_thresholds.get(violation_specialist, default_threshold)
-        e_threshold = per_specialist_thresholds.get(exemption_specialist, default_threshold)
 
         violations: list[Violation] = []
         for chunk in chunks:
-            violation_text = redact_identifiers(chunk.text) if redact_for_violation else chunk.text
+            if trigger_patterns and not any(p.search(chunk.text) for p in trigger_patterns):
+                continue
+            if exempt_names and _method_name_from_signature(chunk.signature) in exempt_names:
+                continue
 
+            violation_text = (
+                redact_identifiers(chunk.text, preserve_prefixes=preserve_prefixes)
+                if redact_for_violation else chunk.text
+            )
             try:
                 v_result = toolkit.classify(violation_specialist, violation_text)
-                e_result = toolkit.classify(exemption_specialist, chunk.text)
             except Exception as exc:
                 log.warning(
                     "classify() failed for composite '%s' on %s: %s",
@@ -203,20 +240,35 @@ class CrasisScorer(BaseScorer):
                 continue
 
             fires = v_result["label"] == "positive" and v_result["confidence"] >= v_threshold
-            exempt = e_result["label"] == "positive" and e_result["confidence"] >= e_threshold
+            if not fires:
+                continue
 
-            if fires and not exempt:
-                rule = f"ARCH:{principle_name} [mandatory]" if is_mandatory else f"ARCH:{principle_name}"
-                violations.append(Violation(
-                    file=str(src_file),
-                    line=chunk.start_line,
-                    rule=rule,
-                    message=(
-                        f"violates '{principle_name}' "
-                        f"(violation={v_result['confidence']:.0%}, exemption={e_result['confidence']:.0%}) "
-                        f"— {chunk.signature}"
-                    ),
-                ))
+            if exemption_specialist is not None:
+                e_threshold = per_specialist_thresholds.get(exemption_specialist, default_threshold)
+                try:
+                    e_result = toolkit.classify(exemption_specialist, chunk.text)
+                except Exception as exc:
+                    log.warning(
+                        "classify() failed for composite '%s' on %s: %s",
+                        principle_name, chunk.location, exc,
+                    )
+                    continue
+                if e_result["label"] == "positive" and e_result["confidence"] >= e_threshold:
+                    continue
+                detail = (
+                    f"violation={v_result['confidence']:.0%}, "
+                    f"exemption={e_result['confidence']:.0%}"
+                )
+            else:
+                detail = f"violation={v_result['confidence']:.0%}, no name exemption"
+
+            rule = f"ARCH:{principle_name} [mandatory]" if is_mandatory else f"ARCH:{principle_name}"
+            violations.append(Violation(
+                file=str(src_file),
+                line=chunk.start_line,
+                rule=rule,
+                message=f"violates '{principle_name}' ({detail}) — {chunk.signature}",
+            ))
 
         return violations, len(chunks)
 
@@ -308,13 +360,28 @@ class CrasisScorer(BaseScorer):
         return max(0.0, 1.0 - violated_weight / total_weight)
 
 
+def _method_name_from_signature(signature: str) -> str:
+    """Extract the bare method/function name from a CodeChunk signature.
+
+    C++ chunks carry the full declaration up to the brace
+    ("void FaultManager::reset_faults()"); Python chunks carry
+    "ClassName.method_name" or "function_name". In both forms the method name
+    is the last identifier before the first '(' (or in the whole string when
+    there are no parens).
+    """
+    head = signature.split("(", 1)[0]
+    identifiers = re.findall(r"\w+", head)
+    return identifiers[-1] if identifiers else ""
+
+
 def _all_constituents(composites: dict[str, dict]) -> set[str]:
     """Return every violation_specialist/exemption_specialist name referenced by
     any composite, so they can be excluded from independent per-specialist scoring."""
     constituents: set[str] = set()
     for composite_cfg in composites.values():
         constituents.add(composite_cfg["violation_specialist"])
-        constituents.add(composite_cfg["exemption_specialist"])
+        if composite_cfg.get("exemption_specialist") is not None:
+            constituents.add(composite_cfg["exemption_specialist"])
     return constituents
 
 

@@ -65,3 +65,29 @@ def test_redact_identifiers_preserves_cpp_keywords_and_builtin_types():
     result = redact_identifiers(text)
     for keyword in ("if", "true", "return", "uint8_t", "int32_t"):
         assert keyword in result
+
+
+def test_redact_identifiers_preserve_prefixes_keeps_rule_vocabulary_calls():
+    # Delegation legitimacy turns on WHICH routine is called: with call names
+    # redacted, "delegates to a clearing routine" and "delegates to anything
+    # else" are the same text with opposite labels. Rule vocabulary survives.
+    text = "void BatterySupervisor::poll_cell(uint8_t cell) { fault_manager_.reset_faults(); update_cell(cell); }"
+    result = redact_identifiers(text, preserve_prefixes=("reset", "clear"))
+    assert "reset_faults(" in result
+    assert "update_cell" not in result
+    assert "fault_manager_" not in result
+    assert "poll_cell" not in result
+
+
+def test_redact_identifiers_preserve_prefixes_applies_in_declaration_position():
+    text = "void FaultManager::clear_faults() { faults_[0] = FaultType::NONE; }"
+    result = redact_identifiers(text, preserve_prefixes=("reset", "clear"))
+    assert "CLASS_0::clear_faults(" in result
+    assert "faults_" not in result
+
+
+def test_redact_identifiers_no_preserve_prefixes_redacts_everything():
+    text = "void BatterySupervisor::request_reset() { fault_manager_.reset_faults(); }"
+    result = redact_identifiers(text)
+    assert "reset_faults" not in result
+    assert "request_reset" not in result
