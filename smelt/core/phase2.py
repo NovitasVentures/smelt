@@ -82,8 +82,10 @@ Output the implementation as multiple sections, one per file, using this delimit
 (file content)
 
 Include ALL .h and .cpp files needed to compile and pass the tests.
-Create subdirectories: common/, hal/, processing/, application/
+Create subdirectories: {src_dirs}
 No explanation. No markdown fences. Nothing before the first --- FILE: --- delimiter."""
+
+_DEFAULT_CPP_SRC_DIRS = ["common", "hal", "processing", "application"]
 
 
 @dataclass
@@ -253,7 +255,9 @@ def run(
     if config.language == "c":
         gen_system = _GEN_SYSTEM_C
     elif config.language == "cpp":
-        gen_system = _GEN_SYSTEM_CPP
+        layer_cfg = config.scorer_config.get("layer")
+        src_dirs = list(layer_cfg["layers"]) + ["common"] if layer_cfg and layer_cfg.get("layers") else _DEFAULT_CPP_SRC_DIRS
+        gen_system = _GEN_SYSTEM_CPP.format(src_dirs=", ".join(f"{d}/" for d in src_dirs))
     else:
         gen_system = _GEN_SYSTEM_PYTHON
     ext = ".c" if config.language == "c" else ".py"
