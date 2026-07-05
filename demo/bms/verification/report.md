@@ -113,33 +113,34 @@ Acceptance rule: violation cases must score above 0.85; clean cases must score b
 
 | Case | Expected | Label | Confidence | Score | Verdict | Note |
 |---|---|---|---|---|---|---|
+| `neg__cellsensor_configure_real_shape.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__inv_batterysupervisor_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
 | `neg__inv_cellmonitor_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
-| `neg__inv_cellsensor_configure.cpp` | negative | positive | 0.7081 | 0.7081 | PASS |  |
+| `neg__inv_cellsensor_configure.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__inv_cellsensor_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
-| `neg__inv_fault_count.cpp` | negative | negative | 0.9492 | 0.0508 | PASS |  |
+| `neg__inv_fault_count.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__inv_faultmanager_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
-| `neg__inv_get_cell_fault.cpp` | negative | negative | 0.9498 | 0.0502 | PASS |  |
-| `neg__inv_get_last_voltage.cpp` | negative | negative | 0.9499 | 0.0501 | PASS |  |
-| `neg__inv_has_any_fault.cpp` | negative | negative | 0.9494 | 0.0506 | PASS |  |
-| `neg__inv_is_contactor_closed.cpp` | negative | negative | 0.9349 | 0.0651 | PASS |  |
-| `neg__inv_is_ready.cpp` | negative | negative | 0.9494 | 0.0506 | PASS |  |
-| `neg__inv_poll_all.cpp` | negative | negative | 0.9489 | 0.0511 | PASS |  |
-| `neg__inv_poll_cell_spec_correct.cpp` | negative | negative | 0.9495 | 0.0505 | PASS |  |
-| `neg__inv_read_cell_temp.cpp` | negative | negative | 0.9489 | 0.0511 | PASS |  |
-| `neg__inv_read_cell_voltage.cpp` | negative | negative | 0.9490 | 0.0510 | PASS |  |
-| `neg__inv_read_temp_raw.cpp` | negative | negative | 0.9493 | 0.0507 | PASS |  |
-| `neg__inv_request_reset.cpp` | negative | negative | 0.9477 | 0.0523 | PASS |  |
-| `neg__inv_reset_faults.cpp` | negative | negative | 0.9492 | 0.0508 | PASS |  |
-| `neg__inv_to_deci_celsius.cpp` | negative | negative | 0.9446 | 0.0554 | PASS |  |
-| `neg__shape1_decision_on_engineering_units.cpp` | negative | negative | 0.9492 | 0.0508 | PASS |  |
-| `neg__shape2_conversion_range_check.cpp` | negative | negative | 0.9449 | 0.0551 | PASS |  |
-| `neg__shape3_hal_bounds_check.cpp` | negative | negative | 0.9492 | 0.0508 | PASS |  |
-| `pos__shape4_raw_vs_bare_literal.cpp` | positive | positive | 0.9573 | 0.9573 | PASS |  |
-| `pos__shape5_raw_vs_counts_constant.cpp` | positive | positive | 0.9519 | 0.9519 | PASS |  |
-| `pos__shape6_poll_cell_raw_shortcut.cpp` | positive | positive | 0.9577 | 0.9577 | PASS |  |
+| `neg__inv_get_cell_fault.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_get_last_voltage.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_has_any_fault.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_is_contactor_closed.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_is_ready.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_poll_all.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_poll_cell_spec_correct.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_read_cell_temp.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_read_cell_voltage.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_read_temp_raw.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_request_reset.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_reset_faults.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__inv_to_deci_celsius.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [violation=negative(0.9446)] |
+| `neg__shape1_decision_on_engineering_units.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__shape2_conversion_range_check.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [violation=negative(0.9449)] |
+| `neg__shape3_hal_bounds_check.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `pos__shape4_raw_vs_bare_literal.cpp` | positive | positive | 0.9573 | 1.0000 | PASS | [violation=positive(0.9573)] |
+| `pos__shape5_raw_vs_counts_constant.cpp` | positive | positive | 0.9519 | 1.0000 | PASS | [violation=positive(0.9519)] |
+| `pos__shape6_poll_cell_raw_shortcut.cpp` | positive | positive | 0.9577 | 1.0000 | PASS | [violation=positive(0.9577)] |
 
-**Summary: 25/25 cases passed.**
+**Summary: 26/26 cases passed.**
 
 ## state-mutation-in-diagnostic-query
 

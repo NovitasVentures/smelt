@@ -65,7 +65,7 @@ specs_dir            = "demo/bms/specs"
 confidence_threshold = 0.85
 active_specialists   = [
   "fault-cleared-outside-reset",                # composite: see [scorers.crasis.composites]
-  "raw-threshold-comparison-in-decision-logic",
+  "raw-threshold-comparison-in-decision-logic", # composite: see [scorers.crasis.composites]
   "state-mutation-in-diagnostic-query",
   "platform-dependent-integer-types",           # Demo 7 rule, retrained on BMS vocabulary (28/28)
   "output-param-written-before-error-check",    # Demo 7 rule, retrained on BMS vocabulary (23/28 — see below)
@@ -104,6 +104,27 @@ redact_for_violation = true                        # redact chunk text before cl
 # redacting those call names makes "delegates to a clearing routine" and
 # "delegates to anything else" the same text with opposite labels.
 redaction_preserve_prefixes = ["reset", "clear"]
+
+[scorers.crasis.composites.raw-threshold-comparison-in-decision-logic]
+# Gate-only composite (no exemption tier): the rule's own definition is "a
+# raw-flavored identifier participates in a COMPARISON against a literal or
+# threshold constant" — never an assignment. The end-to-end run on
+# 2026-07-05 (run 20260705_205805) found CellSensor::configure
+# (raw_voltage_.at(cell) = raw_voltage; — assignment only, zero comparison
+# operators) scoring 0.71-0.95 positive depending on incidental indexing
+# style ([] vs .at()), confirmed by direct classify() to be keyed on
+# surface "raw-flavored identifier near array indexing" rather than the
+# actual comparison the rule requires. A pure-assignment body is
+# structurally incapable of a threshold comparison and never reaches the
+# model. This does not touch the model's separate "is this a conversion/HAL
+# function" name judgment (verified clean, 25/25) — comparisons inside
+# to_millivolts/to_deci_celsius still gate in and are still classified
+# exactly as before.
+violation_specialist = "raw-threshold-comparison-in-decision-logic"
+trigger_patterns = [
+  '\b\w*(?:raw|counts)\w*\b\s*(?:>=|<=|==|!=|>|<)',   # raw-flavored identifier, then a comparison operator
+  '(?:>=|<=|==|!=|>|<)\s*\b\w*(?:raw|counts)\w*\b',   # comparison operator, then a raw-flavored identifier
+]
 
 [scorers.layer]
 layers  = ["hal", "monitoring", "supervision"]

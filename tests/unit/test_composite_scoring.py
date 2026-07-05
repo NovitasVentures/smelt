@@ -78,18 +78,42 @@ def _profile_composite_cfg() -> dict:
     return profile["scorers"]["crasis"]["composites"]["fault-cleared-outside-reset"]
 
 
-def test_composite_requires_exactly_one_exemption_mechanism():
+def test_composite_rejects_both_exemption_mechanisms_at_once():
     always_fires = StubToolkit({"dataflow": {"label": "positive", "confidence": 0.99}})
     both = {
         "violation_specialist": "dataflow",
         "exemption_specialist": "names",
         "exemption_signatures": ["reset_faults"],
     }
-    neither = {"violation_specialist": "dataflow"}
-    with pytest.raises(ValueError, match="exactly one"):
+    with pytest.raises(ValueError, match="at most one"):
         _run_composite(always_fires, both, CLEARS_OUTSIDE_RESET)
-    with pytest.raises(ValueError, match="exactly one"):
-        _run_composite(always_fires, neither, CLEARS_OUTSIDE_RESET)
+
+
+def test_composite_rejects_no_gate_or_exemption_mechanism_at_all():
+    always_fires = StubToolkit({"dataflow": {"label": "positive", "confidence": 0.99}})
+    nothing_configured = {"violation_specialist": "dataflow"}
+    with pytest.raises(ValueError, match="at least one"):
+        _run_composite(always_fires, nothing_configured, CLEARS_OUTSIDE_RESET)
+
+
+def test_composite_trigger_gate_alone_is_a_valid_configuration():
+    """A rule with no separate 'is this permitted' question — the gated model
+    verdict is final — needs no exemption tier at all, only a trigger gate."""
+    fires_on_comparison = StubToolkit({"raw_check": {"label": "positive", "confidence": 0.95}})
+    cfg = {
+        "violation_specialist": "raw_check",
+        "trigger_patterns": [r"\braw_\w*\s*(?:>=|<=|==|!=|>|<)"],
+    }
+    assignment_only = "void CellSensor::configure(int32_t raw_voltage) { raw_voltage_ = raw_voltage; }"
+    comparison_present = "void FaultManager::update_cell(int32_t raw_counts) { if (raw_counts > 3440) {} }"
+
+    violations, _ = _run_composite(fires_on_comparison, cfg, assignment_only)
+    assert violations == []
+    assert fires_on_comparison.calls == []
+
+    violations, _ = _run_composite(fires_on_comparison, cfg, comparison_present)
+    assert len(violations) == 1
+    assert "no name exemption" not in violations[0].message
 
 
 def test_signature_exemption_suppresses_violation_without_model_call():

@@ -46,13 +46,18 @@ class CrasisScorer(BaseScorer):
                       matches exactly are never violations. Use this when the
                       rule's exemption clause names exact functions — a string
                       comparison, not a learning problem.
-                  (exactly one of exemption_specialist/exemption_signatures)
-                  trigger_patterns: list[str] — optional deterministic gate:
-                      regexes applied to the UNREDACTED chunk text; the
-                      violation specialist only evaluates chunks matching at
-                      least one. Chunks matching none are structurally
-                      incapable of violating the rule and are skipped without
-                      a model call.
+                  (at most one of exemption_specialist/exemption_signatures)
+                  trigger_patterns: list[str] — deterministic gate: regexes
+                      applied to the UNREDACTED chunk text; the violation
+                      specialist only evaluates chunks matching at least one.
+                      Chunks matching none are structurally incapable of
+                      violating the rule and are skipped without a model
+                      call. May be used alone, with no exemption tier, when
+                      the rule has no separate "is this permitted" question —
+                      the gated model verdict is final.
+                  At least one of exemption_specialist, exemption_signatures,
+                  or trigger_patterns must be set — otherwise this is not a
+                  composite, just violation_specialist scored directly.
                   redact_for_violation: bool — classify the violation
                       specialist on identifier-redacted text so it cannot
                       learn identifier shortcuts.
@@ -203,13 +208,19 @@ class CrasisScorer(BaseScorer):
         violation_specialist = composite_cfg["violation_specialist"]
         exemption_specialist = composite_cfg.get("exemption_specialist")
         exemption_signatures = composite_cfg.get("exemption_signatures")
-        if (exemption_specialist is None) == (exemption_signatures is None):
+        trigger_patterns = [re.compile(p) for p in composite_cfg.get("trigger_patterns", [])]
+        if exemption_specialist is not None and exemption_signatures is not None:
             raise ValueError(
-                f"composite '{principle_name}' must configure exactly one of "
+                f"composite '{principle_name}' must configure at most one of "
                 "'exemption_specialist' or 'exemption_signatures'"
             )
+        if exemption_specialist is None and exemption_signatures is None and not trigger_patterns:
+            raise ValueError(
+                f"composite '{principle_name}' must configure at least one of "
+                "'exemption_specialist', 'exemption_signatures', or 'trigger_patterns' "
+                "— otherwise it is just violation_specialist alone, not a composite"
+            )
         exempt_names = set(exemption_signatures or [])
-        trigger_patterns = [re.compile(p) for p in composite_cfg.get("trigger_patterns", [])]
         redact_for_violation = bool(composite_cfg.get("redact_for_violation", False))
         preserve_prefixes = tuple(composite_cfg.get("redaction_preserve_prefixes", []))
 
@@ -259,8 +270,10 @@ class CrasisScorer(BaseScorer):
                     f"violation={v_result['confidence']:.0%}, "
                     f"exemption={e_result['confidence']:.0%}"
                 )
-            else:
+            elif exempt_names:
                 detail = f"violation={v_result['confidence']:.0%}, no name exemption"
+            else:
+                detail = f"violation={v_result['confidence']:.0%}"
 
             rule = f"ARCH:{principle_name} [mandatory]" if is_mandatory else f"ARCH:{principle_name}"
             violations.append(Violation(
