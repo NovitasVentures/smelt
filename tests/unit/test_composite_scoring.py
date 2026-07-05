@@ -6,7 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from smelt.scorers.crasis_scorer import CrasisScorer, _method_name_from_signature
+from smelt.scorers.crasis_scorer import (
+    CrasisScorer,
+    _cleared_value_assignment_verdict,
+    _delegation_call_verdict,
+    _method_name_from_signature,
+)
 
 PROFILE_PATH = Path(__file__).resolve().parents[2] / "smelt" / "config" / "profiles" / "demo8_bms.toml"
 
@@ -237,13 +242,44 @@ def test_method_name_from_signature(signature, expected):
 
 
 @pytest.mark.parametrize(
-    ("source", "model_consulted"),
+    ("source", "expected_violation", "model_should_be_consulted"),
     [
-        (CLEARS_OUTSIDE_RESET, True),          # member assignment, not exempt
-        (CLEARS_INSIDE_RESET, False),          # gated in, but name-exempt before any model call
-        (PASS_THROUGH_NO_MEMBER_WRITE, False), # no member write, no clearing-idiom call
-        ("void FaultManager::sync_faults() { for (auto& f : faults_) { f = FaultType::NONE; } }", True),
-        ("void BatterySupervisor::request_reset() { fault_manager_.reset_faults(); }", True),
+        (CLEARS_OUTSIDE_RESET, True, False),          # cleared-value member assignment: deterministic
+        (CLEARS_INSIDE_RESET, False, False),          # name-exempt before any deterministic check or model call
+        (PASS_THROUGH_NO_MEMBER_WRITE, False, False), # gated out: no cleared-value literal, no clearing call
+        (
+            # Range-based loop clearing a member OUTSIDE a reset-named function: violation.
+            "void FaultManager::sync_faults() { for (auto& f : faults_) { f = FaultType::NONE; } }",
+            True, False,
+        ),
+        (
+            # Pure delegation wrapper: the reset call IS the body. Clean.
+            "void BatterySupervisor::request_reset() { fault_manager_.reset_faults(); }",
+            False, False,
+        ),
+        (
+            # Reinit-before-evaluate: a reset call followed by further work. Violation.
+            # The ONLY textual difference from the clean poll_cell shape below is this call.
+            "ErrorCode BatterySupervisor::poll_cell(uint8_t cell) {\n"
+            "    int32_t voltage_mv = 0;\n"
+            "    fault_manager_.reset_faults();\n"
+            "    fault_manager_.update_cell(cell, voltage_mv, 0);\n"
+            "    last_mv_[cell] = voltage_mv;\n"
+            "    return ErrorCode::OK;\n"
+            "}",
+            True, False,
+        ),
+        (
+            # The 2026-07-05 neg__poll_cell false positive: same shape as above minus
+            # the reset call. No cleared-value assignment, no clearing call -> gated out.
+            "ErrorCode BatterySupervisor::poll_cell(uint8_t cell) {\n"
+            "    int32_t voltage_mv = 0;\n"
+            "    fault_manager_.update_cell(cell, voltage_mv, 0);\n"
+            "    last_mv_[cell] = voltage_mv;\n"
+            "    return ErrorCode::OK;\n"
+            "}",
+            False, False,
+        ),
         (
             # Pure read loop: comparison only, never assignment.
             "bool FaultManager::has_any_fault() {\n"
@@ -252,26 +288,90 @@ def test_method_name_from_signature(signature, expected):
             "    }\n"
             "    return false;\n"
             "}",
-            False,
+            False, False,
         ),
         (
-            # Local-only init: assigning NONE to a local is always clean.
+            # The 2026-07-05 neg__shape3_query_local_init false positive: local variable
+            # assigned NONE, never a member -> deterministically clean, no model call.
             "FaultType FaultManager::get_cell_fault(uint8_t cell) {\n"
             "    FaultType current = FaultType::NONE;\n"
             "    if (cell < CELL_COUNT) { current = faults_[cell]; }\n"
             "    return current;\n"
             "}",
-            False,
+            False, False,
         ),
     ],
 )
-def test_profile_trigger_patterns_gate_the_known_shapes(source, model_consulted):
-    """The trigger_patterns/exemption_signatures shipped in demo8_bms.toml must
-    send every shape that can clear fault state (outside the exempt names) to
-    the model, and deterministically exclude read-only/pass-through shapes that
-    produced the round-1/round-2 false positives and the exempt reset functions."""
+def test_profile_composite_resolves_the_known_shapes_deterministically(
+    source, expected_violation, model_should_be_consulted
+):
+    """The full deterministic stack shipped in demo8_bms.toml (exemption
+    signatures, trigger gate, delegation-call verdict, cleared-value verdict)
+    must resolve every known shape — including both false positives found on
+    real generated code in run 20260705_205805 — WITHOUT consulting the model.
+    A toolkit that always answers wrong (negative when a violation is
+    expected, or vice versa) is used so any accidental fallthrough to the
+    model would flip the verdict and fail the test."""
     cfg = _profile_composite_cfg()
     cfg.pop("redact_for_violation", None)
-    toolkit = StubToolkit({cfg["violation_specialist"]: {"label": "negative", "confidence": 0.9}})
-    _, _ = _run_composite(toolkit, cfg, source)
-    assert (len(toolkit.calls) > 0) == model_consulted
+    wrong_answer = "negative" if expected_violation else "positive"
+    toolkit = StubToolkit({cfg["violation_specialist"]: {"label": wrong_answer, "confidence": 0.99}})
+    violations, _ = _run_composite(toolkit, cfg, source)
+    assert bool(violations) == expected_violation
+    assert (len(toolkit.calls) > 0) == model_should_be_consulted
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("void CLASS_0::FUNC_0() { MEMBER_0.reset_faults(); }", False),  # pure delegation
+        (
+            "void CLASS_0::FUNC_0() { if (!MEMBER_1) { return; } MEMBER_0.clear_faults(); }",
+            False,  # guard clause + delegation only
+        ),
+        (
+            "ErrorCode CLASS_0::FUNC_0() { MEMBER_0.reset_faults(); return ErrorCode::OK; }",
+            False,  # delegation + bare trailing return
+        ),
+        (
+            "ErrorCode CLASS_0::FUNC_0(uint8_t cell) {\n"
+            "    MEMBER_1.reset_faults();\n"
+            "    MEMBER_1.update_cell(cell, 0, 0);\n"
+            "    return ErrorCode::OK;\n"
+            "}",
+            True,  # reset call followed by further work: reinit-before-evaluate
+        ),
+    ],
+)
+def test_delegation_call_verdict_distinguishes_pure_delegation_from_reinit(text, expected):
+    patterns = [__import__("re").compile(r"\b(?:\w+_\s*\.\s*)?(?:reset|clear)\w*\s*\([^)]*\)\s*;")]
+    assert _delegation_call_verdict(text, patterns) is expected
+
+
+def test_delegation_call_verdict_returns_none_when_no_pattern_matches():
+    patterns = [__import__("re").compile(r"\b(?:\w+_\s*\.\s*)?(?:reset|clear)\w*\s*\([^)]*\)\s*;")]
+    no_clearing_call = "void CLASS_0::FUNC_0() { MEMBER_0.update_cell(0, 0, 0); }"
+    assert _delegation_call_verdict(no_clearing_call, patterns) is None
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        # This deterministic tier runs on the ORIGINAL (unredacted) chunk text —
+        # crasis_scorer.py calls it as `_cleared_value_assignment_verdict(chunk.text, ...)`,
+        # before the separate redact_for_violation step that only applies to the
+        # model fallback path — so it sees real trailing-underscore member names,
+        # never the MEMBER_n placeholders redact_identifiers() would produce.
+        ("faults_[cell] = FaultType::NONE;", True),                      # indexed member assignment
+        ("faults_ = FaultType::NONE;", True),                            # bare member assignment
+        (
+            "for (auto& fault : faults_) { fault = FaultType::NONE; }",
+            True,  # range-based loop over a member container
+        ),
+        ("FaultType current = FaultType::NONE;", False),                 # local variable, not a member
+        ("if (faults_[cell] != FaultType::NONE) { return true; }", False),  # comparison, not assignment
+        ("faults_[cell] = FaultType::OVER_VOLTAGE;", False),              # different value entirely
+    ],
+)
+def test_cleared_value_assignment_verdict(text, expected):
+    assert _cleared_value_assignment_verdict(text, ["FaultType::NONE"]) is expected

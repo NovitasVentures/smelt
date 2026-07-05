@@ -84,26 +84,66 @@ mandatory_principles = [
 
 [scorers.crasis.composites.fault-cleared-outside-reset]
 # A chunk violates this composite principle iff it passes the trigger gate, is not
-# name-exempt, AND violation_specialist fires positive. Trigger patterns and the
-# exemption run on the UNREDACTED chunk; the specialist classifies redacted text.
+# name-exempt, and either a deterministic tier resolves it as a violation, or
+# (when no deterministic tier applies) violation_specialist fires positive.
+# Trigger patterns, name exemption, and the deterministic tiers below all run
+# on the UNREDACTED chunk; only the model classifies redacted text.
 violation_specialist = "fault-clearing-dataflow"   # data-flow judgment, trained on redacted text
 # SAD 6.2 exempts exactly these function names — a string comparison, not a
 # learning problem (checked against CodeChunk.signature's method name).
 exemption_signatures = ["reset_faults", "clear_faults"]
-# Transcription of the rule's trigger clause: a function that never assigns to a
-# member, never loops over a member container, and never invokes a clearing-idiom
-# call is structurally incapable of clearing fault state — skipped, no model call.
+# Transcription of the rule's trigger clause: "clearing" is defined as assigning
+# the literal FaultType::NONE, or delegating to a reset/clear-named routine —
+# nothing else. A chunk containing neither is structurally incapable of
+# clearing fault state and skips both the deterministic tiers and the model.
 trigger_patterns = [
-  '\b\w+_\s*(?:\[[^\]]*\]\s*)?(?:[&|^]?=)(?!=)',        # assignment to trailing-underscore member or element
-  ':\s*\w+_\s*\)',                                       # range-based loop over a member container
+  'FaultType::NONE',                                     # the only value this rule calls "cleared"
   '\b(?:\w+_\s*\.\s*)?(?:reset|clear|fill|assign)\w*\s*\(',  # clearing-idiom call, bare or member-qualified
 ]
-redact_for_violation = true                        # redact chunk text before classify() with violation_specialist
-# The rule's own vocabulary survives redaction: whether a call is to a
-# reset/clear-named routine is what the delegation judgment turns on —
-# redacting those call names makes "delegates to a clearing routine" and
-# "delegates to anything else" the same text with opposite labels.
-redaction_preserve_prefixes = ["reset", "clear"]
+#
+# --- Deterministic tiers (2026-07-05, run 20260705_205805 findings) ---
+#
+# Both false positives found on real generated code turned out to be
+# structural-shape questions, not data-flow judgment questions — exactly the
+# kind of question redaction makes UNLEARNABLE rather than merely hard,
+# because it erases the one thing (identifier role: member vs. local,
+# specific call name) the question actually turns on:
+#
+# 1. delegation_call_patterns: does a reset/clear-prefixed call sit alone in
+#    the body (clean delegation) or is it followed by further work (violation
+#    — reinit-before-evaluate)? The ONLY textual difference between
+#    neg__poll_cell (clean) and pos__shape7 (violation) is the presence of a
+#    single `fault_manager_.reset_faults();` call; the model persistently
+#    misclassified neg__poll_cell because after redaction this is a
+#    control-flow-shape question with no data-flow content left to judge.
+#    Fixed as a deterministic check (`_delegation_call_verdict`) rather than
+#    more training examples — build 8 already tried that and made the false
+#    positive worse, not better (see specialist_authoring.md).
+# 2. cleared_value_patterns: is FaultType::NONE assigned to a MEMBER (trailing
+#    underscore, direct/indexed/range-loop) or to a local variable? After
+#    redaction, `MEMBER_0 = FaultType::NONE` and
+#    `FaultType current = FaultType::NONE` (a local) are structurally close —
+#    the model misclassified neg__shape3_query_local_init (local-only) as a
+#    violation once the trigger gate was tightened enough to let it reach the
+#    model at all. The member/local distinction is a hard structural fact
+#    (the chunker's own trailing-underscore convention), not a learned one.
+#
+# Measured against the full 28-case verification suite, these two tiers plus
+# the exemption/trigger gates above resolve every case correctly except one
+# constructor shape the production chunker filters out before it ever reaches
+# any scorer (see verify.py's production_chunks doc) — i.e. the deterministic
+# path alone reproduces (and on real generated code, exceeds) 8 build rounds'
+# worth of model accuracy. The model is kept as the fallback for any chunk
+# neither deterministic tier resolves (there are currently none in the known
+# shape catalog) rather than removed outright, since a generated codebase can
+# still produce a genuinely novel shape the hand-authored suite didn't
+# anticipate.
+redaction_preserve_prefixes = ["reset", "clear"]   # rule vocabulary must survive redaction for the model fallback
+delegation_call_patterns = [
+  '\b(?:\w+_\s*\.\s*)?(?:reset|clear)\w*\s*\([^)]*\)\s*;',
+]
+cleared_value_patterns = ["FaultType::NONE"]
+redact_for_violation = true                        # redact chunk text before classify() with violation_specialist (fallback only)
 
 [scorers.crasis.composites.raw-threshold-comparison-in-decision-logic]
 # Gate-only composite (no exemption tier): the rule's own definition is "a

@@ -209,16 +209,22 @@ class CrasisScorer(BaseScorer):
         exemption_specialist = composite_cfg.get("exemption_specialist")
         exemption_signatures = composite_cfg.get("exemption_signatures")
         trigger_patterns = [re.compile(p) for p in composite_cfg.get("trigger_patterns", [])]
+        delegation_call_patterns = [re.compile(p) for p in composite_cfg.get("delegation_call_patterns", [])]
+        cleared_value_patterns = list(composite_cfg.get("cleared_value_patterns", []))
         if exemption_specialist is not None and exemption_signatures is not None:
             raise ValueError(
                 f"composite '{principle_name}' must configure at most one of "
                 "'exemption_specialist' or 'exemption_signatures'"
             )
-        if exemption_specialist is None and exemption_signatures is None and not trigger_patterns:
+        if (
+            exemption_specialist is None and exemption_signatures is None
+            and not trigger_patterns and not delegation_call_patterns and not cleared_value_patterns
+        ):
             raise ValueError(
                 f"composite '{principle_name}' must configure at least one of "
-                "'exemption_specialist', 'exemption_signatures', or 'trigger_patterns' "
-                "— otherwise it is just violation_specialist alone, not a composite"
+                "'exemption_specialist', 'exemption_signatures', 'trigger_patterns', "
+                "'delegation_call_patterns', or 'cleared_value_patterns' — otherwise it "
+                "is just violation_specialist alone, not a composite"
             )
         exempt_names = set(exemption_signatures or [])
         redact_for_violation = bool(composite_cfg.get("redact_for_violation", False))
@@ -235,6 +241,46 @@ class CrasisScorer(BaseScorer):
             if trigger_patterns and not any(p.search(chunk.text) for p in trigger_patterns):
                 continue
             if exempt_names and _method_name_from_signature(chunk.signature) in exempt_names:
+                continue
+
+            delegation_verdict = _delegation_call_verdict(chunk.text, delegation_call_patterns)
+            if delegation_verdict is not None:
+                if delegation_verdict:
+                    rule = f"ARCH:{principle_name} [mandatory]" if is_mandatory else f"ARCH:{principle_name}"
+                    violations.append(Violation(
+                        file=str(src_file),
+                        line=chunk.start_line,
+                        rule=rule,
+                        message=(
+                            f"violates '{principle_name}' "
+                            f"(delegation call followed by further work, no model call) "
+                            f"— {chunk.signature}"
+                        ),
+                    ))
+                continue
+
+            if cleared_value_patterns:
+                if _cleared_value_assignment_verdict(chunk.text, cleared_value_patterns):
+                    rule = f"ARCH:{principle_name} [mandatory]" if is_mandatory else f"ARCH:{principle_name}"
+                    violations.append(Violation(
+                        file=str(src_file),
+                        line=chunk.start_line,
+                        rule=rule,
+                        message=(
+                            f"violates '{principle_name}' "
+                            f"(cleared-value member assignment, no model call) "
+                            f"— {chunk.signature}"
+                        ),
+                    ))
+                # False is authoritative here, not "no opinion": this chunk
+                # passed the trigger gate and found no delegation-call match
+                # (checked above), so the only reason it is in this branch at
+                # all is the presence of a cleared-value literal somewhere in
+                # its text — a comparison or local-variable use, per this
+                # function's contract. There is no remaining mechanism (this
+                # composite has none) that could turn that into a violation,
+                # so skip the model rather than let a redaction-blinded
+                # judgment override a structural fact.
                 continue
 
             violation_text = (
@@ -371,6 +417,82 @@ class CrasisScorer(BaseScorer):
             for name in violated
         )
         return max(0.0, 1.0 - violated_weight / total_weight)
+
+
+def _cleared_value_assignment_verdict(chunk_text: str, cleared_value_patterns: list[str]) -> bool:
+    """Deterministic verdict for "is a cleared value assigned to a member?"
+
+    Returns True if any of `cleared_value_patterns` (each a literal value the
+    rule calls "cleared", e.g. "FaultType::NONE") is assigned — via a direct
+    or array-indexed trailing-underscore member, or via a range-based loop
+    variable bound to a trailing-underscore member container — to a member.
+    Returns False otherwise (the value may appear in a comparison or a
+    local-variable assignment, which this deliberately does not count as a
+    clearing assignment).
+
+    Callers treat False as authoritative (a clean verdict, not "no opinion")
+    ONLY when the chunk is known by some other means to actually contain one
+    of `cleared_value_patterns` — e.g. because trigger_patterns already
+    required it and no other deterministic tier (like a delegation-call
+    check) matched first. If the chunk might not contain the value at all,
+    False alone does not establish that; check with something like
+    `value in chunk_text` first, or fall through to a learned specialist.
+
+    This exists because after identifier redaction (which a violation
+    specialist needs to avoid keying on project vocabulary), a member
+    assignment (`MEMBER_0 = FaultType::NONE`) and a local-variable assignment
+    of the identical literal (`FaultType current = FaultType::NONE`) become
+    structurally close — the chunker's own member-vs-local distinction (the
+    trailing underscore) survives redaction and is a hard structural fact,
+    not something a small classifier reliably learns from naturally-generated
+    training data (see demo/bms/specialist_authoring.md build history for a
+    case where it did not).
+    """
+    for value in cleared_value_patterns:
+        # Direct or array-indexed trailing-underscore member assignment.
+        if re.search(rf'\b\w+_\s*(?:\[[^\]]*\])?\s*=\s*{re.escape(value)}\b', chunk_text):
+            return True
+        # Range-based loop over a trailing-underscore member container whose
+        # loop variable is assigned the cleared value: for (auto& x : m_) { x = V; }
+        for loop_match in re.finditer(r'for\s*\(\s*auto\s*&\s*(\w+)\s*:\s*\w+_\s*\)', chunk_text):
+            loop_var = loop_match.group(1)
+            if re.search(rf'\b{re.escape(loop_var)}\s*=\s*{re.escape(value)}\b', chunk_text):
+                return True
+    return False
+
+
+def _delegation_call_verdict(chunk_text: str, patterns: list["re.Pattern[str]"]) -> bool | None:
+    """Deterministic verdict for a "delegates to a named routine" ambiguity.
+
+    Returns True (violation) if a call matching one of `patterns` is followed
+    by further work in the same function body (anything beyond an optional
+    trailing return and closing braces) — the call's effect is undone or
+    supplemented by subsequent statements, e.g. "reset the state, then
+    recompute it" (reinit-before-evaluate). Returns False (clean) if the
+    matched call is essentially the entire body (a pure delegation wrapper,
+    optionally preceded by a guard clause and/or followed only by a bare
+    return) — the function defers entirely to the callee. Returns None if no
+    pattern matches, meaning this mechanism has no opinion and the caller
+    should fall through to the next tier (e.g. a learned specialist).
+
+    This exists because "does the body do anything after calling X" is a
+    question about control-flow shape, not identifier meaning — deciding it
+    with a trained classifier invites exactly the token-correlation shortcut
+    this composite architecture exists to avoid (see
+    demo/bms/specialist_authoring.md build history for a case where a single
+    classifier could not reliably separate these two shapes from
+    naturally-generated training data).
+    """
+    for pattern in patterns:
+        match = pattern.search(chunk_text)
+        if not match:
+            continue
+        rest = chunk_text[match.end():]
+        rest = re.sub(r"\s+", " ", rest).strip()
+        rest = re.sub(r"return\s+[^;]*;\s*\}*\s*$", "", rest).strip()
+        rest = rest.rstrip("}").strip()
+        return len(rest) > 0
+    return None
 
 
 def _method_name_from_signature(signature: str) -> str:

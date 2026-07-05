@@ -51,7 +51,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from smelt.scorers.chunker import ChunkLevel, CodeChunk, chunk_code, redact_identifiers
-from smelt.scorers.crasis_scorer import _method_name_from_signature
+from smelt.scorers.crasis_scorer import (
+    _cleared_value_assignment_verdict,
+    _delegation_call_verdict,
+    _method_name_from_signature,
+)
 
 VERIFICATION_DIR = Path(__file__).resolve().parent
 CASES_DIR = VERIFICATION_DIR / "cases"
@@ -231,6 +235,8 @@ def verify_composite(name: str, models_dir: Path, composite_cfg: dict) -> list[C
     exemption_name = composite_cfg.get("exemption_specialist")
     exempt_names = set(composite_cfg.get("exemption_signatures") or [])
     trigger_patterns = [re.compile(p) for p in composite_cfg.get("trigger_patterns", [])]
+    delegation_call_patterns = [re.compile(p) for p in composite_cfg.get("delegation_call_patterns", [])]
+    cleared_value_patterns = list(composite_cfg.get("cleared_value_patterns", []))
     redact_for_violation = bool(composite_cfg.get("redact_for_violation", False))
     preserve_prefixes = tuple(composite_cfg.get("redaction_preserve_prefixes", []))
 
@@ -281,6 +287,31 @@ def verify_composite(name: str, models_dir: Path, composite_cfg: dict) -> list[C
                 continue
             if exempt_names and _method_name_from_signature(chunk.signature) in exempt_names:
                 details.append(f"name-exempt ({_method_name_from_signature(chunk.signature)})")
+                continue
+
+            delegation_verdict = _delegation_call_verdict(chunk.text, delegation_call_patterns)
+            if delegation_verdict is not None:
+                details.append(
+                    f"delegation-call-verdict={'positive' if delegation_verdict else 'negative'} "
+                    "(no model call)"
+                )
+                if delegation_verdict:
+                    composite_positive = True
+                    confidence = max(confidence, 1.0)
+                continue
+
+            if cleared_value_patterns:
+                # False is authoritative here (see crasis_scorer.py's
+                # _cleared_value_assignment_verdict docstring): this chunk
+                # passed the trigger gate and found no delegation-call match,
+                # so the only reason it reached this branch is the presence
+                # of a cleared-value literal — a comparison or local-variable
+                # use, per this function's contract. No model call.
+                verdict = _cleared_value_assignment_verdict(chunk.text, cleared_value_patterns)
+                details.append(f"cleared-value-verdict={'positive' if verdict else 'negative'} (no model call)")
+                if verdict:
+                    composite_positive = True
+                    confidence = max(confidence, 1.0)
                 continue
 
             violation_text = (

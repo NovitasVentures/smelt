@@ -10,34 +10,34 @@ Acceptance rule: violation cases must score above 0.85; clean cases must score b
 |---|---|---|---|---|---|---|
 | `neg__batterysupervisor_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
 | `neg__cellmonitor_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
-| `neg__cellsensor_configure.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [violation=negative(0.9947)] |
+| `neg__cellsensor_configure.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__cellsensor_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
-| `neg__fault_count.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__fault_count.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [cleared-value-verdict=negative (no model call)] |
 | `neg__faultmanager_ctor.cpp` | negative | unscored | 0.0000 | 0.0000 | PASS | never scored in production (chunker yields no function-level chunk) |
 | `neg__get_last_voltage.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
-| `neg__has_any_fault.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__has_any_fault.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [cleared-value-verdict=negative (no model call)] |
 | `neg__is_contactor_closed.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__is_ready.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__poll_all.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
-| `neg__poll_cell.cpp` | negative | positive | 0.9953 | 1.0000 | FAIL | clean case scored 1.0000, required < 0.8 [violation=positive(0.9953)] |
+| `neg__poll_cell.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__read_cell_temp.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__read_cell_voltage.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__read_temp_raw.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__read_voltage_raw.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__shape1_reset_faults_loop.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [name-exempt (reset_faults)] |
-| `neg__shape2_update_cell_sets_only.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [violation=positive(0.8254)] |
-| `neg__shape3_query_local_init.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
-| `neg__shape4_request_reset_delegates.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [violation=negative(0.9966)] |
+| `neg__shape2_update_cell_sets_only.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
+| `neg__shape3_query_local_init.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [cleared-value-verdict=negative (no model call)] |
+| `neg__shape4_request_reset_delegates.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [delegation-call-verdict=negative (no model call)] |
 | `neg__shape8_reset_faults_range_based_loop.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [name-exempt (reset_faults)] |
 | `neg__shape9_clear_faults_range_based_loop.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [name-exempt (clear_faults)] |
 | `neg__to_deci_celsius.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__to_millivolts.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
-| `pos__shape10_sync_faults_range_based_loop_violation.cpp` | positive | positive | 0.9955 | 1.0000 | PASS | [violation=positive(0.9955)] |
-| `pos__shape5_update_cell_else_clears.cpp` | positive | positive | 0.9959 | 1.0000 | PASS | [violation=positive(0.9959)] |
-| `pos__shape6_get_cell_fault_read_clears.cpp` | positive | positive | 0.9966 | 1.0000 | PASS | [violation=positive(0.9966)] |
-| `pos__shape7_poll_cell_reinit_before_evaluate.cpp` | positive | positive | 0.9964 | 1.0000 | PASS | [violation=positive(0.9964)] |
+| `pos__shape10_sync_faults_range_based_loop_violation.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [cleared-value-verdict=positive (no model call)] |
+| `pos__shape5_update_cell_else_clears.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [cleared-value-verdict=positive (no model call)] |
+| `pos__shape6_get_cell_fault_read_clears.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [cleared-value-verdict=positive (no model call)] |
+| `pos__shape7_poll_cell_reinit_before_evaluate.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [delegation-call-verdict=positive (no model call)] |
 
-**Summary: 27/28 cases passed.**
+**Summary: 28/28 cases passed.**
 
 ## output-param-written-before-error-check (non-mandatory)
 
@@ -173,4 +173,4 @@ Acceptance rule: violation cases must score above 0.85; clean cases must score b
 
 ---
 
-**Overall result: FAIL**
+**Overall result: PASS**
