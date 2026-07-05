@@ -23,7 +23,17 @@ weights = { clang_tidy = 0.20, crasis = 0.40, layer = 0.40 }
 # cert, and cppcoreguidelines are the closest published supersets of the
 # AUTOSAR C++14 guidance. If iteration-1 clang-tidy detail drowns the
 # architectural failure detail in reprompts, trim readability-* first.
-checks = "hicpp-*,cert-*,cppcoreguidelines-*,bugprone-*,modernize-*,readability-*"
+#
+# bugprone-easily-swappable-parameters excluded (2026-07-05, run 20260705_205805):
+# its only real fix is a signature change (e.g. bundling same-typed params into
+# a struct), which the black-box generator cannot verify is compatible with the
+# frozen tests it cannot see. It fired every iteration on
+# CellSensor::configure(cell, raw_voltage, raw_temp, ready) and twice caused a
+# build-failure regression (iterations 13 and 15 of 15) when the generator
+# "fixed" it by introducing a CellConfig struct, breaking the frozen tests'
+# 4-argument calls. This is the exact risk the paragraph above already warns
+# about — a real instance, not a hypothetical one.
+checks = "hicpp-*,cert-*,cppcoreguidelines-*,bugprone-*,-bugprone-easily-swappable-parameters,modernize-*,readability-*"
 
 [scorers.crasis]
 # All five specialists trained fresh from BMS-vocabulary specs. Two of them

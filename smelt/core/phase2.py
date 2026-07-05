@@ -33,6 +33,11 @@ compliance rules and run against a frozen GTest test suite.
 Do not hardcode values to pass specific tests.
 Do not modify test files — they are read-only ground truth.
 Fix the failures described. Do not introduce new ones.
+Never change a function's name, parameter count, parameter order, or parameter \
+types to satisfy a style or compliance rule — the frozen tests call these \
+functions by their exact existing signature and you cannot see their source \
+to verify a signature change is safe. If a compliance rule and signature \
+compatibility conflict, keep the signature and accept the compliance violation.
 
 MISRA C:2012 constraints you MUST satisfy:
 - No dynamic memory allocation (malloc, calloc, realloc, free) — Rule 21.3
@@ -58,6 +63,11 @@ clang-tidy compliance rules and run against a frozen GTest test suite.
 Do not hardcode values to pass specific tests.
 Do not modify test files — they are read-only ground truth.
 Fix the failures described. Do not introduce new ones.
+Never change a function's name, parameter count, parameter order, or parameter \
+types to satisfy a style or compliance rule — the frozen tests call these \
+functions by their exact existing signature and you cannot see their source \
+to verify a signature change is safe. If a compliance rule and signature \
+compatibility conflict, keep the signature and accept the compliance violation.
 
 C++14 / AUTOSAR constraints you MUST satisfy:
 - All integer types must be fixed-width types from <cstdint> (int32_t, uint8_t, etc.) \
