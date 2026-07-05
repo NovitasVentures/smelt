@@ -86,3 +86,17 @@ Real, but secondary — most of the false positives observed (e.g.
 Fixing spec wording alone (skipping step 1) will not resolve the universal FP
 pattern — it would repeat the T4a mistake of treating an infrastructure defect
 as a per-spec problem.
+
+---
+
+**Status update (2026-07-05).** Step 1 (prompt scaffold) was fixed as crasis
+1.3.1 on 2026-07-03 and all specialists retrained against it. Step 2 (the
+128-token truncation) was NOT applied at that time — and it turned out to be
+the root cause of the `shape7` reinit-before-evaluate false negative that
+survived every subsequent retrain: `shape7`'s redacted chunk is 193 tokens and
+its `reset_faults()` call sits past token 128, so the model never saw the
+violation at training or inference. There was also a fourth truncation site
+this diagnosis missed: `deploy.py` (`Specialist.classify`) truncated at 128 at
+runtime, affecting every deployed specialist, not just training. Fixed as
+crasis 1.4.0 (`CRASIS_MAX_SEQUENCE_LENGTH`, default 512, all four sites).
+Re-verification at 512 showed no regressions on the four passing specialists.
