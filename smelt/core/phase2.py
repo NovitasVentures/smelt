@@ -274,6 +274,7 @@ def run(
 
     prior_scorer_results: dict[str, ScoreResult] | None = None
     prior_goal: RunResult | None = None
+    prior_implementation_source: str | None = None
 
     for n in range(1, config.max_iterations + 1):
         _verify_manifest(manifest_path, frozen_test_path, test_hash)
@@ -289,6 +290,7 @@ def run(
             n=n,
             prior_scorer_results=prior_scorer_results,
             prior_goal=prior_goal,
+            prior_implementation_source=prior_implementation_source,
             weights=config.scorer_weights,
             scorer_config=config.scorer_config,
         )
@@ -338,6 +340,7 @@ def run(
 
         prior_scorer_results = scorer_results
         prior_goal = goal_result
+        prior_implementation_source = implementation_source
 
         converged = (
             compliance_score >= config.compliance_threshold
@@ -390,6 +393,7 @@ def _build_prompt(
     n: int,
     prior_scorer_results: dict[str, ScoreResult] | None,
     prior_goal: RunResult | None,
+    prior_implementation_source: str | None,
     weights: dict[str, float],
     scorer_config: dict[str, dict] | None = None,
 ) -> str:
@@ -412,13 +416,28 @@ def _build_prompt(
 
     compliance_section = _format_compliance_failures(prior_scorer_results, specs_index)
     goal_section = _format_goal_failures(prior_goal)
+    mandatory_section = _format_passing_mandatory_reminders(
+        prior_scorer_results, scorer_config or {}, specs_index
+    )
+
+    prior_code_section = (
+        f"YOUR PREVIOUS IMPLEMENTATION (iteration {n - 1} — edit this, "
+        f"do not restart from the spec):\n{prior_implementation_source}\n\n"
+        if prior_implementation_source else ""
+    )
 
     return (
         header
         + f"SCORE: {composite:.2f}  compliance={compliance_score:.2f}  goal={goal_score:.2f}\n\n"
-        f"COMPLIANCE FAILURES:\n{compliance_section}\n\n"
+        + prior_code_section
+        + f"COMPLIANCE FAILURES:\n{compliance_section}\n\n"
         f"TEST FAILURES ({prior_goal.failed if prior_goal else 0}):\n{goal_section}\n\n"
-        "Fix the implementation. Return ONLY the corrected file."
+        + (f"STILL MANDATORY — currently passing, do not reintroduce:\n{mandatory_section}\n\n"
+           if mandatory_section else "")
+        + "Fix the specific failures listed above in your previous implementation. "
+        "Keep everything that already works — do not rewrite or restructure code "
+        "that has no failure listed against it. Return the complete corrected "
+        "implementation in the same file format."
     )
 
 
@@ -481,6 +500,58 @@ def _format_goal_failures(result: RunResult | None) -> str:
     for f in result.failures[:10]:
         parts.append(f"  {f.test_name}\n    {f.message[:200]}")
     return "\n".join(parts)
+
+
+def _format_passing_mandatory_reminders(
+    results: dict[str, ScoreResult] | None,
+    scorer_config: dict[str, dict],
+    crasis_specs: dict[str, dict],
+) -> str:
+    """List mandatory principles NOT currently violated, so the reprompt can't
+    go silent on a rule the model happened to satisfy this iteration.
+
+    Without this, a mandatory principle that isn't in this iteration's
+    COMPLIANCE FAILURES section is invisible to the reprompt entirely, and
+    the loop regenerates the whole file from a natural-language failure list
+    with no memory that the principle was ever a problem — a fixed violation
+    can silently reappear on a later iteration with nothing in the prompt to
+    stop it (observed in practice: Demo 8 BMS run 20260706_004627, iteration
+    2 fixed an else-clears violation, iteration 4 reintroduced the identical
+    bug because that iteration's failure list had nothing else to say about
+    it). Principles that ARE currently violated are deliberately excluded
+    here — they already get full rule/file/line/message detail in
+    COMPLIANCE FAILURES; repeating them here would just be duplicate text in
+    a different voice.
+    """
+    violated: set[str] = set()
+    for result in (results or {}).values():
+        for v in result.violations:
+            violated.add(v.rule.replace(" [mandatory]", "").split(":", 1)[-1])
+
+    lines: list[str] = []
+
+    crasis_cfg = scorer_config.get("crasis", {})
+    composites = crasis_cfg.get("composites", {})
+    for principle in crasis_cfg.get("mandatory_principles", []):
+        if principle in violated:
+            continue
+        spec_info = crasis_specs.get(principle)
+        if spec_info is None and principle in composites:
+            # Composite principle names aren't spec file names — fall back to
+            # the composite's own judgment specialist for descriptive text.
+            spec_info = crasis_specs.get(composites[principle].get("violation_specialist", ""))
+        trigger = (spec_info or {}).get("trigger", "")
+        line = f"  {principle}"
+        if trigger:
+            line += f" — {trigger[:150]}"
+        lines.append(line)
+
+    layer_cfg = scorer_config.get("layer", {})
+    if layer_cfg.get("layers") and layer_cfg.get("mandatory", True) and "layer-isolation" not in violated:
+        layers = " → ".join(layer_cfg["layers"])
+        lines.append(f"  layer-isolation — dependencies must flow {layers} only, no upward or skipped includes")
+
+    return "\n".join(lines)
 
 
 def _write_iteration(
