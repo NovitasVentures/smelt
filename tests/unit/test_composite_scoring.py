@@ -363,6 +363,13 @@ def test_delegation_call_verdict_returns_none_when_no_pattern_matches():
         # model fallback path — so it sees real trailing-underscore member names,
         # never the MEMBER_n placeholders redact_identifiers() would produce.
         ("faults_[cell] = FaultType::NONE;", True),                      # indexed member assignment
+        (
+            "faults_.at(cell) = FaultType::NONE;",
+            True,  # .at()-indexed member assignment: found missing on real generated
+                   # code 2026-07-06 (run 20260706_021845, iteration 3) -- the run's
+                   # composite score falsely reached CONVERGED with this exact
+                   # violation present because only [] indexing was recognized.
+        ),
         ("faults_ = FaultType::NONE;", True),                            # bare member assignment
         (
             "for (auto& fault : faults_) { fault = FaultType::NONE; }",
@@ -370,7 +377,9 @@ def test_delegation_call_verdict_returns_none_when_no_pattern_matches():
         ),
         ("FaultType current = FaultType::NONE;", False),                 # local variable, not a member
         ("if (faults_[cell] != FaultType::NONE) { return true; }", False),  # comparison, not assignment
+        ("if (faults_.at(cell) != FaultType::NONE) { return true; }", False),  # .at() comparison, not assignment
         ("faults_[cell] = FaultType::OVER_VOLTAGE;", False),              # different value entirely
+        ("faults_.at(cell) = FaultType::OVER_VOLTAGE;", False),          # different value via .at()
     ],
 )
 def test_cleared_value_assignment_verdict(text, expected):

@@ -471,8 +471,16 @@ def _cleared_value_assignment_verdict(chunk_text: str, cleared_value_patterns: l
     case where it did not).
     """
     for value in cleared_value_patterns:
-        # Direct or array-indexed trailing-underscore member assignment.
-        if re.search(rf'\b\w+_\s*(?:\[[^\]]*\])?\s*=\s*{re.escape(value)}\b', chunk_text):
+        # Direct, array-indexed ([cell]), or bounds-checked-method-indexed
+        # (.at(cell)) trailing-underscore member assignment. Both indexing
+        # styles are idiomatic C++ for the exact same operation — a member
+        # assignment via .at() that this check missed (found on real
+        # generated code, 2026-07-06, run 20260706_021845, iteration 3:
+        # faults_.at(cell) = FaultType::NONE; in a genuine else-clears
+        # violation) is exactly as much a violation as the [cell] form.
+        if re.search(
+            rf'\b\w+_\s*(?:\[[^\]]*\]|\.\s*at\s*\([^)]*\))?\s*=\s*{re.escape(value)}\b', chunk_text
+        ):
             return True
         # Range-based loop over a trailing-underscore member container whose
         # loop variable is assigned the cleared value: for (auto& x : m_) { x = V; }
