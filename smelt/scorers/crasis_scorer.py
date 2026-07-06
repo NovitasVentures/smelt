@@ -259,8 +259,12 @@ class CrasisScorer(BaseScorer):
                     ))
                 continue
 
-            if cleared_value_patterns:
-                if _cleared_value_assignment_verdict(chunk.text, cleared_value_patterns):
+            cleared_value_verdict = (
+                _cleared_value_assignment_verdict(chunk.text, cleared_value_patterns)
+                if cleared_value_patterns else None
+            )
+            if cleared_value_verdict is not None:
+                if cleared_value_verdict:
                     rule = f"ARCH:{principle_name} [mandatory]" if is_mandatory else f"ARCH:{principle_name}"
                     violations.append(Violation(
                         file=str(src_file),
@@ -272,15 +276,15 @@ class CrasisScorer(BaseScorer):
                             f"— {chunk.signature}"
                         ),
                     ))
-                # False is authoritative here, not "no opinion": this chunk
-                # passed the trigger gate and found no delegation-call match
-                # (checked above), so the only reason it is in this branch at
-                # all is the presence of a cleared-value literal somewhere in
-                # its text — a comparison or local-variable use, per this
-                # function's contract. There is no remaining mechanism (this
-                # composite has none) that could turn that into a violation,
-                # so skip the model rather than let a redaction-blinded
-                # judgment override a structural fact.
+                # False is authoritative here (not None), meaning "no
+                # opinion": this chunk passed the trigger gate and found no
+                # delegation-call match (checked above), and the deterministic
+                # check found neither a direct member assignment nor a
+                # local-variable-laundering path for the cleared value — no
+                # remaining mechanism in this composite could turn that into
+                # a violation, so skip the model. A None verdict (laundering
+                # path present but not resolvable by pattern matching alone)
+                # falls through to the model below instead.
                 continue
 
             violation_text = (
@@ -419,16 +423,34 @@ class CrasisScorer(BaseScorer):
         return max(0.0, 1.0 - violated_weight / total_weight)
 
 
-def _cleared_value_assignment_verdict(chunk_text: str, cleared_value_patterns: list[str]) -> bool:
+def _cleared_value_assignment_verdict(chunk_text: str, cleared_value_patterns: list[str]) -> bool | None:
     """Deterministic verdict for "is a cleared value assigned to a member?"
 
     Returns True if any of `cleared_value_patterns` (each a literal value the
     rule calls "cleared", e.g. "FaultType::NONE") is assigned — via a direct
     or array-indexed trailing-underscore member, or via a range-based loop
     variable bound to a trailing-underscore member container — to a member.
-    Returns False otherwise (the value may appear in a comparison or a
-    local-variable assignment, which this deliberately does not count as a
-    clearing assignment).
+
+    Returns None (no opinion — the caller must fall through to a learned
+    specialist) if a LOCAL variable (no trailing underscore) is initialized
+    or assigned one of the cleared values AND that same local variable is
+    later assigned to a trailing-underscore member anywhere in the chunk.
+    This is a real, general escape from a pure text-pattern check: the
+    cleared value reaches the member through data flow, not literal
+    adjacency, and pattern matching cannot trace it — but a genuine
+    architectural violation is exactly what this shape is, so it must not be
+    silently waved through as clean either. Confirmed via a real generated
+    example (2026-07-05, run 20260705_215725, iteration 12):
+    `FaultType fault = FaultType::NONE; ... faults_.at(cell) = fault;` is
+    semantically identical to the else-clears violation this rule exists to
+    catch, and the trained violation_specialist correctly classifies it
+    positive (99.6% confidence) when actually consulted — this function must
+    not suppress that consultation.
+
+    Returns False otherwise: no member assignment, direct or laundered
+    through a local. The value may still appear in a comparison or in a
+    local variable that never reaches a member, which is not a clearing
+    assignment under this rule.
 
     Callers treat False as authoritative (a clean verdict, not "no opinion")
     ONLY when the chunk is known by some other means to actually contain one
@@ -458,6 +480,19 @@ def _cleared_value_assignment_verdict(chunk_text: str, cleared_value_patterns: l
             loop_var = loop_match.group(1)
             if re.search(rf'\b{re.escape(loop_var)}\s*=\s*{re.escape(value)}\b', chunk_text):
                 return True
+        # Laundering check: a local (non-member) variable assigned the cleared
+        # value anywhere, then later assigned into a member — the model must
+        # judge whether that local can still hold the cleared value at the
+        # point of the member assignment (this function cannot trace branches).
+        for local_match in re.finditer(rf'\b(?:\w+\s+)?(\w+)\s*=\s*{re.escape(value)}\b', chunk_text):
+            local_var = local_match.group(1)
+            if local_var.endswith('_'):
+                continue  # this is the direct-member-assignment case, handled above
+            if re.search(
+                rf'\b\w+_\s*(?:\[[^\]]*\]|\.\s*\w+\s*\([^)]*\))?\s*=\s*{re.escape(local_var)}\b',
+                chunk_text,
+            ):
+                return None
     return False
 
 

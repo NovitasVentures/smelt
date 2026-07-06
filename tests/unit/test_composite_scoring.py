@@ -375,3 +375,53 @@ def test_delegation_call_verdict_returns_none_when_no_pattern_matches():
 )
 def test_cleared_value_assignment_verdict(text, expected):
     assert _cleared_value_assignment_verdict(text, ["FaultType::NONE"]) is expected
+
+
+LAUNDERED_ELSE_CLEAR = """\
+auto FaultManager::update_cell(uint8_t cell, int32_t voltage_mv, int32_t temp_dc) -> ErrorCode {
+    if (cell >= CELL_COUNT) {
+        return ErrorCode::INVALID_ARGUMENT;
+    }
+    FaultType fault = FaultType::NONE;
+    if (voltage_mv > OVER_VOLTAGE_MV) {
+        fault = FaultType::OVER_VOLTAGE;
+    } else if (voltage_mv < UNDER_VOLTAGE_MV) {
+        fault = FaultType::UNDER_VOLTAGE;
+    } else if (temp_dc > OVER_TEMP_DC) {
+        fault = FaultType::OVER_TEMP;
+    }
+    faults_.at(cell) = fault;
+    return ErrorCode::OK;
+}
+"""
+
+
+def test_cleared_value_assignment_verdict_detects_laundering_through_a_local():
+    """A local variable initialized to the cleared value and later assigned
+    into a member is a real violation (semantically identical to an
+    else-clear) that pure literal-adjacency matching cannot resolve on its
+    own — it must return None (defer to the model), not False (clean).
+    Confirmed against a real generated example, 2026-07-05 run
+    20260705_215725 iteration 12: this exact shape scored 99.6% positive
+    when the trained specialist was actually consulted."""
+    assert _cleared_value_assignment_verdict(LAUNDERED_ELSE_CLEAR, ["FaultType::NONE"]) is None
+
+
+def test_composite_falls_through_to_model_for_laundered_else_clear():
+    """End-to-end: the composite must consult the model (not silently pass)
+    for the laundering shape, and must actually raise the violation when the
+    model correctly classifies it positive — this is the real regression
+    this test guards against: an earlier version of _score_composite treated
+    ANY False/no-direct-match cleared-value result as authoritative and
+    never called the model at all for this shape, silently missing a real
+    architectural violation."""
+    toolkit = StubToolkit({"dataflow": {"label": "positive", "confidence": 0.996}})
+    cfg = {
+        "violation_specialist": "dataflow",
+        "exemption_signatures": ["reset_faults", "clear_faults"],
+        "trigger_patterns": ["FaultType::NONE"],
+        "cleared_value_patterns": ["FaultType::NONE"],
+    }
+    violations, _ = _run_composite(toolkit, cfg, LAUNDERED_ELSE_CLEAR)
+    assert len(toolkit.calls) == 1
+    assert len(violations) == 1

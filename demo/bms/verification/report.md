@@ -33,11 +33,12 @@ Acceptance rule: violation cases must score above 0.85; clean cases must score b
 | `neg__to_deci_celsius.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `neg__to_millivolts.cpp` | negative | negative | 0.0000 | 0.0000 | PASS | [gated-out (no trigger pattern)] |
 | `pos__shape10_sync_faults_range_based_loop_violation.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [cleared-value-verdict=positive (no model call)] |
+| `pos__shape11_laundered_else_clear.cpp` | positive | positive | 0.9963 | 1.0000 | PASS | [violation=positive(0.9963)] |
 | `pos__shape5_update_cell_else_clears.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [cleared-value-verdict=positive (no model call)] |
 | `pos__shape6_get_cell_fault_read_clears.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [cleared-value-verdict=positive (no model call)] |
 | `pos__shape7_poll_cell_reinit_before_evaluate.cpp` | positive | positive | 1.0000 | 1.0000 | PASS | [delegation-call-verdict=positive (no model call)] |
 
-**Summary: 28/28 cases passed.**
+**Summary: 29/29 cases passed.**
 
 ## output-param-written-before-error-check (non-mandatory)
 

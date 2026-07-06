@@ -300,16 +300,20 @@ def verify_composite(name: str, models_dir: Path, composite_cfg: dict) -> list[C
                     confidence = max(confidence, 1.0)
                 continue
 
-            if cleared_value_patterns:
+            cleared_value_verdict = (
+                _cleared_value_assignment_verdict(chunk.text, cleared_value_patterns)
+                if cleared_value_patterns else None
+            )
+            if cleared_value_verdict is not None:
                 # False is authoritative here (see crasis_scorer.py's
-                # _cleared_value_assignment_verdict docstring): this chunk
-                # passed the trigger gate and found no delegation-call match,
-                # so the only reason it reached this branch is the presence
-                # of a cleared-value literal — a comparison or local-variable
-                # use, per this function's contract. No model call.
-                verdict = _cleared_value_assignment_verdict(chunk.text, cleared_value_patterns)
-                details.append(f"cleared-value-verdict={'positive' if verdict else 'negative'} (no model call)")
-                if verdict:
+                # _cleared_value_assignment_verdict docstring): no direct
+                # member assignment and no local-variable-laundering path for
+                # the cleared value. A None verdict (laundering path present)
+                # falls through to the model instead of hitting this branch.
+                details.append(
+                    f"cleared-value-verdict={'positive' if cleared_value_verdict else 'negative'} (no model call)"
+                )
+                if cleared_value_verdict:
                     composite_positive = True
                     confidence = max(confidence, 1.0)
                 continue
